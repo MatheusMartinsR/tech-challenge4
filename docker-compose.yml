@@ -1,0 +1,73 @@
+# Issue #2 — Banco de dados para armazenamento de feedbacks.
+#
+# Nuvem ainda não definida: este arquivo sobe um MongoDB local via Docker,
+# já seguindo os mesmos princípios que serão exigidos no provedor gerenciado
+# (DynamoDB, RDS, Atlas, DocumentDB etc.) quando a escolha for feita:
+#
+#   - Rede isolada: o container só é alcançável pela rede `feedback-net` e
+#     pelo host local (127.0.0.1) — nenhuma porta é exposta publicamente.
+#     Na nuvem, isso equivale a colocar o banco em subnets privadas de uma
+#     VPC, sem IP público, com Security Group liberando apenas a porta do
+#     banco para o Security Group/VPC Endpoint das funções serverless.
+#   - Autenticação obrigatória (`--auth`): só conecta quem tiver credenciais.
+#   - Criptografia em trânsito: ver bloco comentado de TLS abaixo. No
+#     provedor gerenciado (Atlas/DocumentDB) o TLS é nativo e obrigatório.
+#   - Criptografia em repouso: MongoDB Community não suporta isso
+#     nativamente (é recurso Enterprise/Atlas). Na nuvem, ative a
+#     criptografia nativa do serviço (KMS da AWS, Atlas Encryption at Rest).
+#   - Usuário de acesso: em produção, crie um usuário dedicado às funções
+#     serverless com a role mínima necessária (ex.: readWrite restrito ao
+#     banco `feedbacks`), em vez do usuário root usado aqui para simplificar
+#     o ambiente local.
+#
+# Uso:
+#   MONGO_ROOT_USER=app MONGO_ROOT_PASSWORD=senha-forte docker compose up -d
+
+networks:
+  feedback-net:
+    driver: bridge
+
+volumes:
+  feedback-db-data:
+
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: feedback-db
+    restart: unless-stopped
+    networks:
+      - feedback-net
+    ports:
+      # Vinculado só ao loopback: outras máquinas da rede não alcançam o banco.
+      - "127.0.0.1:${MONGO_PORT:-27017}:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-feedback_app}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-change-me-strong-password}
+      MONGO_INITDB_DATABASE: ${MONGO_DB_NAME:-feedbacks}
+    command: ["--auth", "--bind_ip_all"]
+    # Para exigir TLS também localmente:
+    # 1. Gere um certificado (ex.: mkcert ou openssl) em ./certs/mongodb.pem
+    # 2. Descomente o volume de certs logo abaixo
+    # 3. Troque o command acima por:
+    #    command: ["--auth", "--bind_ip_all", "--tlsMode", "requireTLS", "--tlsCertificateKeyFile", "/etc/mongo/certs/mongodb.pem"]
+    volumes:
+      - feedback-db-data:/data/db
+      # - ./certs:/etc/mongo/certs:ro
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mongosh",
+          "--quiet",
+          "--eval",
+          "db.adminCommand('ping')",
+          "-u",
+          "$$MONGO_INITDB_ROOT_USERNAME",
+          "-p",
+          "$$MONGO_INITDB_ROOT_PASSWORD",
+          "--authenticationDatabase",
+          "admin",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
