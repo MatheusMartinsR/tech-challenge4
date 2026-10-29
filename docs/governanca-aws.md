@@ -172,7 +172,7 @@ acesso de administrador. Sem access keys, esse caminho não existe.
 
 ---
 
-## 5. Acesso das funções: uma role por função 🔜
+## 5. Acesso das funções: uma role por função ✅
 
 Cada função Lambda recebe sua **própria role IAM** (o "crachá" com que ela acessa outros serviços), com **apenas as ações
 necessárias e apenas nos recursos dela** — nunca `*`. As roles são criadas pelo template SAM, de modo que ficam
@@ -181,8 +181,8 @@ versionadas e revisáveis no repositório.
 | Função | Pode fazer | Em qual recurso |
 |---|---|---|
 | **Ingestão** — `POST /avaliacao` | `dynamodb:PutItem` · `sns:Publish` | Tabela de feedbacks · tópico de feedback crítico |
-| **Notificação** | `sqs:ReceiveMessage`, `sqs:DeleteMessage`, `sqs:GetQueueAttributes` · `ses:SendEmail` | Fila de notificações · identidade de e-mail verificada |
-| **Relatório semanal** | `dynamodb:Query` / `dynamodb:Scan` · `ses:SendEmail` | Tabela de feedbacks · identidade de e-mail verificada |
+| **Notificação** | `sqs:ReceiveMessage`, `sqs:DeleteMessage`, `sqs:GetQueueAttributes` · `ses:SendEmail`, `ses:SendRawEmail` | Fila de notificações · identidade de e-mail verificada |
+| **Relatório semanal** | `dynamodb:Query` · `ses:SendEmail`, `ses:SendRawEmail` | Tabela de feedbacks · identidade de e-mail verificada |
 | Todas | `logs:CreateLogStream`, `logs:PutLogEvents` | O próprio log group |
 
 Consequências práticas:
@@ -192,8 +192,14 @@ Consequências práticas:
 - Uma falha ou vulnerabilidade em uma função fica restrita ao que aquela role permite.
 - O DynamoDB fica **acessível apenas pelas funções autorizadas**, controlado por IAM, sem precisar de VPC.
 
-No SAM, isso é declarado com *policy templates* com escopo de recurso, por exemplo
-`DynamoDBWritePolicy: { TableName: !Ref FeedbackTable }`.
+As roles são declaradas **explicitamente** no `template.yaml` (`IngestionRole`, `NotificationRole`,
+`WeeklyReportRole`), em vez de usar os atalhos (*policy templates*) do SAM: alguns desses atalhos concedem mais ações do
+que o necessário ou usam `Resource: *`. Assim, cada permissão fica visível e revisável no repositório. A única role
+gerada pelo SAM é a do EventBridge Scheduler, usada apenas para disparar a função de relatório.
+
+Role da ingestão implantada em `dev` — três permissões, cada uma presa a um recurso específico:
+
+![Policy da role de ingestão com escopo mínimo](img/ingestion-role-policy.png)
 
 ---
 
@@ -212,7 +218,7 @@ automático** da stack para a última versão estável.
 
 ---
 
-## 7. Porta de entrada: API Gateway 🔜
+## 7. Porta de entrada: API Gateway ✅
 
 O **API Gateway** é a **única porta de entrada** da aplicação. As funções não têm URL pública própria (sem *Function URL*).
 
@@ -223,8 +229,23 @@ O **API Gateway** é a **única porta de entrada** da aplicação. As funções 
 | Validação | Request validator do API Gateway para rejeitar payloads malformados antes de invocar a função |
 | Criptografia em trânsito | Somente HTTPS (padrão do API Gateway) |
 
+Limites configurados no Usage Plan: **5 requisições/segundo**, rajada de **10** e cota de **1.000 requisições/dia**.
+
 A API Key não é segredo forte (identifica o cliente e permite limitar o uso). Ela não é versionada no repositório: é
 obtida no console ou via CLI por quem tem acesso à conta.
+
+### Validação realizada em `dev`
+
+| Requisição | Resultado | Quem respondeu |
+|---|---|---|
+| Sem header `x-api-key` | ✅ `403 Forbidden` | API Gateway |
+| Com API Key e payload válido | ✅ `202` | Função de ingestão |
+| `nota` fora do intervalo (15) | ✅ `400 Invalid request body` | API Gateway |
+| Sem `descricao` | ✅ `400 Invalid request body` | API Gateway |
+| `nota` enviada como texto (`"9"`) | ✅ `400 Invalid request body` | API Gateway |
+
+Requisições sem chave ou com payload inválido **não chegam a invocar a função**: são barradas antes, sem custo de
+execução.
 
 ### Limitação e evolução: autenticação de usuários com JWT
 
@@ -259,7 +280,9 @@ autenticação e rate limiting com menor complexidade de configuração e de tes
 
 ---
 
-## 9. Auditoria: CloudTrail ✅
+## 9. Auditoria e logs ✅
+
+### CloudTrail (ações na conta)
 
 | Configuração | Valor |
 |---|---|
@@ -273,6 +296,20 @@ O CloudTrail registra **quem** fez **o quê**, **quando** e **de onde** (login n
 mudanças de permissão). A primeira trilha de management events não tem custo; paga-se apenas o armazenamento no S3.
 
 ![Trilha do CloudTrail ativa: multi-região, validação de integridade e tags do projeto](img/cloudtrail.png)
+
+### CloudWatch Logs (execução das funções)
+
+Cada função tem seu **log group declarado no template**, o que traz duas garantias:
+
+- **Retenção definida** (14 dias), em vez do padrão "nunca expira", que acumularia custo indefinidamente.
+- O log group **pertence à stack**: é removido junto com ela, sem deixar recursos órfãos.
+
+Os logs são gravados em **formato JSON** (logs estruturados), o que permite filtrar e consultar por campo no CloudWatch
+Logs Insights.
+
+![Log group da função de ingestão com retenção de 2 semanas](img/lambda-log-group.png)
+
+![Eventos de log em JSON de uma execução da função de ingestão](img/lambda-log-events.png)
 
 ---
 
@@ -297,12 +334,19 @@ do projeto no Cost Explorer.
 
 ---
 
-## 11. Segregação de ambientes 🔜
+## 11. Segregação de ambientes ✅ (`dev` implantado; `prod` configurado)
 
 Contas separadas por ambiente (via AWS Organizations) seriam o ideal em uma empresa, mas são desproporcionais para o
 projeto. A segregação é feita **por stage no IaC**: o mesmo template é implantado como **stacks independentes**
 (`dev` e `prod`), com recursos prefixados pelo nome do stage. Um deploy em `dev` não altera nem acessa os recursos de
 `prod`, e cada função só recebe permissão sobre os recursos do próprio stage.
+
+| Stage | Stack | Comando |
+|---|---|---|
+| `dev` | `tc4-dev` | `sam deploy` |
+| `prod` | `tc4-prod` | `sam deploy --config-env prod` |
+
+Em `prod`, a tabela de feedbacks tem **proteção contra exclusão** ativada.
 
 ---
 
@@ -318,7 +362,8 @@ projeto. A segregação é feita **por stage no IaC**: o mesmo template é impla
 | CloudTrail multi-região com validação de integridade | ✅ |
 | Budget com alertas | ✅ |
 | Nenhuma credencial no repositório | ✅ |
-| Uma role mínima por função | 🔜 |
-| API Gateway com API Key + Usage Plan | 🔜 |
+| Uma role mínima por função | ✅ |
+| API Gateway com API Key + Usage Plan + validação do payload | ✅ |
+| Logs das funções com retenção definida e formato JSON | ✅ |
+| Stages `dev` / `prod` | ✅ `dev` implantado · `prod` configurado |
 | Pipeline com OIDC (sem chaves) | 🔜 |
-| Stages `dev` / `prod` | 🔜 |
