@@ -226,6 +226,23 @@ O **API Gateway** é a **única porta de entrada** da aplicação. As funções 
 A API Key não é segredo forte (identifica o cliente e permite limitar o uso). Ela não é versionada no repositório: é
 obtida no console ou via CLI por quem tem acesso à conta.
 
+### Limitação e evolução: autenticação de usuários com JWT
+
+A API Key identifica e limita **uma aplicação cliente**, não **um usuário**. Ela é adequada para integrações entre
+sistemas e para o escopo deste desafio, mas em um aplicativo web ou mobile público ficaria embutida no front-end,
+visível a qualquer pessoa, e não diria qual aluno enviou cada avaliação.
+
+Em um ambiente de produção, a evolução seria autenticar os usuários com **Amazon Cognito**:
+
+1. O aluno faz login em um **Cognito User Pool** e recebe um **token JWT**.
+2. As requisições passam a enviar `Authorization: Bearer <token>`.
+3. Um **Cognito Authorizer** no API Gateway valida o token antes de invocar a função.
+
+O Usage Plan continuaria aplicando o rate limiting. Essa mudança permitiria identificar o autor de cada avaliação,
+impedir envios repetidos e separar os perfis de aluno e administrador, mas exige uma decisão de produto: se as
+avaliações devem ou não ser anônimas. Optou-se pela API Key neste momento porque ela atende ao requisito de
+autenticação e rate limiting com menor complexidade de configuração e de teste.
+
 ---
 
 ## 8. Segredos e credenciais no repositório ✅
