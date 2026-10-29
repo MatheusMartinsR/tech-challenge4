@@ -1,3 +1,18 @@
+# Segredos e configuração local (nunca versionar)
 .env
+.env.*
+*.pem
+*.key
+
+# IDE
 .idea/
+*.iml
+.vscode/
+
+# Java / Maven
+target/
+
+# AWS SAM (artefatos de build)
+.aws-sam/
+
 node_modules/
