@@ -1,0 +1,351 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Tech Challenge Fase 4 - plataforma de feedback de aulas (Grupo 35)
+
+Parameters:
+  Stage:
+    Type: String
+    AllowedValues: [dev, prod]
+    Default: dev
+    Description: Ambiente. Cada stage é implantado como uma stack separada.
+  SenderEmail:
+    Type: String
+    Default: not-configured@example.com
+    Description: Remetente verificado no SES, usado pelas funções de notificação e de relatório.
+  LogRetentionDays:
+    Type: Number
+    Default: 14
+    AllowedValues: [7, 14, 30, 60, 90]
+
+Conditions:
+  IsProd: !Equals [!Ref Stage, prod]
+
+Globals:
+  Function:
+    Runtime: java21
+    Architectures: [x86_64]
+    MemorySize: 512
+    Timeout: 20
+    # SnapStart reduz o cold start do Java; exige versões publicadas (alias "live")
+    AutoPublishAlias: live
+    SnapStart:
+      ApplyOn: PublishedVersions
+    Environment:
+      Variables:
+        STAGE: !Ref Stage
+  Api:
+    # Evita o stage extra "Stage" que o SAM cria por padrão
+    OpenApiVersion: '3.0.1'
+
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # Banco de dados
+  # ---------------------------------------------------------------------------
+
+  # Chave proposta em docs/proposta-chave-dynamodb.md (pk = DAY#<data>, sk = <timestamp>#<id>)
+  # Criptografia em repouso: padrão do DynamoDB (chave da AWS, sem custo)
+  # TODO (Issue #2 - banco): confirmar a chave com o grupo e avaliar PITR (backup contínuo)
+  FeedbackTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub tc4-${Stage}-feedbacks
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      DeletionProtectionEnabled: !If [IsProd, true, false]
+
+  # ---------------------------------------------------------------------------
+  # Eventos: ingestão -> SNS -> SQS -> notificação (falhas vão para a DLQ)
+  # ---------------------------------------------------------------------------
+
+  CriticalFeedbackTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub tc4-${Stage}-critical-feedback
+      KmsMasterKeyId: alias/aws/sns
+
+  # TODO (Issue de resiliência): revisar maxReceiveCount e adicionar alarme na DLQ
+  NotificationQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub tc4-${Stage}-notification
+      VisibilityTimeout: 120  # >= 6x o timeout da função, recomendação da AWS
+      SqsManagedSseEnabled: true
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt NotificationDLQ.Arn
+        maxReceiveCount: 3
+
+  NotificationDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub tc4-${Stage}-notification-dlq
+      MessageRetentionPeriod: 1209600  # 14 dias, o máximo
+      SqsManagedSseEnabled: true
+
+  # Somente o tópico de feedback crítico pode enviar mensagens para a fila
+  NotificationQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues: [!Ref NotificationQueue]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt NotificationQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref CriticalFeedbackTopic
+
+  CriticalFeedbackSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref CriticalFeedbackTopic
+      Protocol: sqs
+      Endpoint: !GetAtt NotificationQueue.Arn
+      RawMessageDelivery: true
+
+  # ---------------------------------------------------------------------------
+  # API Gateway: porta de entrada única, com API Key e limite de requisições
+  # ---------------------------------------------------------------------------
+
+  FeedbackApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub tc4-${Stage}-api
+      StageName: !Ref Stage
+      Auth:
+        ApiKeyRequired: true
+        UsagePlan:
+          CreateUsagePlan: PER_API
+          UsagePlanName: !Sub tc4-${Stage}-usage-plan
+          Throttle:
+            RateLimit: 5
+            BurstLimit: 10
+          Quota:
+            Limit: 1000
+            Period: DAY
+      # Payload inválido é rejeitado pelo API Gateway (400) sem invocar a função.
+      # Os campos seguem o contrato do enunciado: { "descricao": string, "nota": int (0 a 10) }
+      Models:
+        EvaluationRequest:
+          type: object
+          required: [descricao, nota]
+          properties:
+            descricao:
+              type: string
+              minLength: 1
+              maxLength: 1000
+            nota:
+              type: integer
+              minimum: 0
+              maximum: 10
+
+  # ---------------------------------------------------------------------------
+  # Função de ingestão: POST /avaliacao
+  # ---------------------------------------------------------------------------
+
+  IngestionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub tc4-${Stage}-ingestion
+      CodeUri: functions/ingestion
+      Handler: br.com.fiap.tc4.ingestion.IngestionHandler::handleRequest
+      Role: !GetAtt IngestionRole.Arn
+      LoggingConfig:
+        LogFormat: JSON
+        LogGroup: !Ref IngestionLogGroup
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref FeedbackTable
+          TOPIC_ARN: !Ref CriticalFeedbackTopic
+      Events:
+        PostEvaluation:
+          Type: Api
+          Properties:
+            RestApiId: !Ref FeedbackApi
+            Path: /avaliacao
+            Method: post
+            RequestModel:
+              Model: EvaluationRequest
+              Required: true
+              ValidateBody: true
+
+  IngestionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/tc4-${Stage}-ingestion
+      RetentionInDays: !Ref LogRetentionDays
+
+  IngestionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ingestion-least-privilege
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: WriteLogs
+                Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt IngestionLogGroup.Arn
+              - Sid: PutFeedback
+                Effect: Allow
+                Action: dynamodb:PutItem
+                Resource: !GetAtt FeedbackTable.Arn
+              - Sid: PublishCriticalFeedback
+                Effect: Allow
+                Action: sns:Publish
+                Resource: !Ref CriticalFeedbackTopic
+
+  # ---------------------------------------------------------------------------
+  # Função de notificação: consome a fila e envia e-mail aos administradores
+  # ---------------------------------------------------------------------------
+
+  NotificationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub tc4-${Stage}-notification
+      CodeUri: functions/notification
+      Handler: br.com.fiap.tc4.notification.NotificationHandler::handleRequest
+      Role: !GetAtt NotificationRole.Arn
+      LoggingConfig:
+        LogFormat: JSON
+        LogGroup: !Ref NotificationLogGroup
+      Environment:
+        Variables:
+          SENDER_EMAIL: !Ref SenderEmail
+      Events:
+        NotificationQueueEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt NotificationQueue.Arn
+            BatchSize: 1
+            FunctionResponseTypes: [ReportBatchItemFailures]
+
+  NotificationLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/tc4-${Stage}-notification
+      RetentionInDays: !Ref LogRetentionDays
+
+  # TODO (Issue de e-mail): incluir o ARN do template do SES, se for usado
+  NotificationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: notification-least-privilege
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: WriteLogs
+                Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt NotificationLogGroup.Arn
+              - Sid: ConsumeQueue
+                Effect: Allow
+                Action: [sqs:ReceiveMessage, sqs:DeleteMessage, sqs:GetQueueAttributes]
+                Resource: !GetAtt NotificationQueue.Arn
+              - Sid: SendEmail
+                Effect: Allow
+                Action: [ses:SendEmail, ses:SendRawEmail]
+                Resource: !Sub arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/${SenderEmail}
+
+  # ---------------------------------------------------------------------------
+  # Função de relatório: executada toda segunda-feira às 08:00 (horário de Brasília)
+  # ---------------------------------------------------------------------------
+
+  WeeklyReportFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub tc4-${Stage}-weekly-report
+      CodeUri: functions/weekly-report
+      Handler: br.com.fiap.tc4.report.WeeklyReportHandler::handleRequest
+      Role: !GetAtt WeeklyReportRole.Arn
+      LoggingConfig:
+        LogFormat: JSON
+        LogGroup: !Ref WeeklyReportLogGroup
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref FeedbackTable
+          SENDER_EMAIL: !Ref SenderEmail
+      Events:
+        WeeklySchedule:
+          Type: ScheduleV2
+          Properties:
+            Name: !Sub tc4-${Stage}-weekly-report
+            ScheduleExpression: cron(0 8 ? * MON *)
+            ScheduleExpressionTimezone: America/Sao_Paulo
+
+  WeeklyReportLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/tc4-${Stage}-weekly-report
+      RetentionInDays: !Ref LogRetentionDays
+
+  WeeklyReportRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: weekly-report-least-privilege
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: WriteLogs
+                Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt WeeklyReportLogGroup.Arn
+              - Sid: QueryFeedbacks
+                Effect: Allow
+                Action: dynamodb:Query
+                Resource: !GetAtt FeedbackTable.Arn
+              - Sid: SendEmail
+                Effect: Allow
+                Action: [ses:SendEmail, ses:SendRawEmail]
+                Resource: !Sub arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/${SenderEmail}
+
+Outputs:
+  ApiUrl:
+    Description: Endpoint POST /avaliacao
+    Value: !Sub https://${FeedbackApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${Stage}/avaliacao
+  ApiKeyId:
+    Description: "ID da API Key. Para ver o valor: aws apigateway get-api-key --api-key <id> --include-value"
+    Value: !Ref FeedbackApiApiKey
+  FeedbackTableName:
+    Value: !Ref FeedbackTable
+  NotificationQueueUrl:
+    Value: !Ref NotificationQueue
+  NotificationDLQUrl:
+    Value: !Ref NotificationDLQ

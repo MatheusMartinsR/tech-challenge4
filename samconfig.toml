@@ -1,0 +1,36 @@
+# Uso:
+#   sam build
+#   sam deploy                      -> stack tc4-dev
+#   sam deploy --config-env prod    -> stack tc4-prod
+version = 0.1
+
+[default.global.parameters]
+region = "us-east-1"
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.validate.parameters]
+lint = true
+
+[default.deploy.parameters]
+stack_name = "tc4-dev"
+parameter_overrides = "Stage=dev"
+tags = "Project=\"tech-challenge4\" ManagedBy=\"sam\" Environment=\"dev\""
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+resolve_s3 = true
+s3_prefix = "tc4-dev"
+
+[prod.global.parameters]
+region = "us-east-1"
+
+[prod.deploy.parameters]
+stack_name = "tc4-prod"
+parameter_overrides = "Stage=prod"
+tags = "Project=\"tech-challenge4\" ManagedBy=\"sam\" Environment=\"prod\""
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+resolve_s3 = true
+s3_prefix = "tc4-prod"
