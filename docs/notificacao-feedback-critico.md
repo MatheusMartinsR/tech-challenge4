@@ -133,6 +133,11 @@ Alarme disparado:
 
 ![Alarme da DLQ em ALARM](img/notificacao-alarme-dlq.png)
 
+Com o tópico de alertas ligado ao alarme, o teste foi repetido (`{"id":"teste-falha-002","nota":1}`) e o e-mail de
+alerta chegou quando o alarme entrou em `ALARM`, às 20:06:33 UTC (identificadores ocultados):
+
+![E-mail de alerta do alarme da DLQ](img/notificacao-email-alarme.png)
+
 ### O que fazer quando o alarme disparar
 
 1. Abrir os logs da função (`/aws/lambda/tc4-<stage>-notification`) e filtrar por `ERROR` para ver o motivo.
