@@ -165,8 +165,10 @@ A conta está no sandbox do SES: o remetente **e todos os destinatários** preci
 | `sqs:ReceiveMessage`, `sqs:DeleteMessage`, `sqs:GetQueueAttributes` | fila de notificação | Consumir a fila |
 | `ses:SendEmail` | identidades SES da conta, com condição `ses:FromAddress = SenderEmail` | Enviar e-mail apenas como o remetente configurado |
 
-O recurso cobre as identidades da conta porque, no sandbox, o SES também confere a permissão contra os destinatários
-verificados. A condição impede que a função envie em nome de outro endereço. A função não tem permissão de escrita
+O recurso cobre as identidades da conta, e não só a do remetente, por precaução: no sandbox, os destinatários também
+são identidades verificadas, e o SES pode conferir a permissão contra elas. Essa configuração foi validada no teste em
+dev; a alternativa restrita à identidade do remetente não foi testada. A condição `ses:FromAddress` impede que a
+função envie em nome de outro endereço. A função não tem permissão de escrita
 na DLQ: quem move a mensagem é o próprio SQS.
 
 ---

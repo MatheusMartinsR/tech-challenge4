@@ -273,8 +273,9 @@ Resources:
       RetentionInDays: !Ref LogRetentionDays
 
   # TODO (Issue de e-mail): incluir o ARN do template do SES, se for usado
-  # O SES confere a permissão também contra os destinatários que são identidades verificadas
-  # (caso do sandbox), por isso o recurso cobre as identidades da conta na região, não só o remetente.
+  # O recurso cobre as identidades da conta na região, não só o remetente, por precaução: no sandbox
+  # os destinatários também são identidades verificadas e o SES pode conferir a permissão contra elas.
+  # A condição ses:FromAddress mantém o envio restrito ao remetente configurado.
   NotificationRole:
     Type: AWS::IAM::Role
     Properties:
