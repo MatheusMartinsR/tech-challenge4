@@ -16,6 +16,10 @@ Parameters:
     Type: String
     Default: not-configured@example.com
     Description: Administradores que recebem os feedbacks críticos, separados por vírgula. No sandbox do SES, todos precisam estar verificados.
+  AlertEmail:
+    Type: String
+    Default: ''
+    Description: E-mail inscrito no tópico de alertas operacionais (opcional). A AWS envia um e-mail de confirmação da inscrição.
   LogRetentionDays:
     Type: Number
     Default: 14
@@ -23,6 +27,7 @@ Parameters:
 
 Conditions:
   IsProd: !Equals [!Ref Stage, prod]
+  HasAlertEmail: !Not [!Equals [!Ref AlertEmail, '']]
 
 Globals:
   Function:
@@ -96,8 +101,8 @@ Resources:
       MessageRetentionPeriod: 1209600  # 14 dias, o máximo
       SqsManagedSseEnabled: true
 
-  # Dispara assim que existir qualquer mensagem na DLQ (notificação que falhou 3 vezes).
-  # TODO (monitoramento): ligar AlarmActions ao tópico de alertas quando ele existir.
+  # Dispara assim que existir qualquer mensagem na DLQ (notificação que falhou 3 vezes)
+  # e avisa o tópico de alertas ao entrar em ALARM e ao voltar para OK.
   NotificationDLQAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
@@ -114,6 +119,27 @@ Resources:
       Threshold: 0
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertsTopic]
+      OKActions: [!Ref AlertsTopic]
+
+  # ---------------------------------------------------------------------------
+  # Alertas operacionais: alarmes do CloudWatch publicam aqui; inscrições por e-mail
+  # ---------------------------------------------------------------------------
+
+  # Sem criptografia com a chave gerenciada aws/sns: o CloudWatch não consegue publicar em tópicos
+  # cifrados com ela, e uma chave KMS própria teria custo mensal. O conteúdo é só o estado do alarme.
+  AlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub tc4-${Stage}-alerts
+
+  AlertsEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlertEmail
+    Properties:
+      TopicArn: !Ref AlertsTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
 
   # Somente o tópico de feedback crítico pode enviar mensagens para a fila
   NotificationQueuePolicy:
@@ -368,6 +394,9 @@ Resources:
                 Resource: !Sub arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/${SenderEmail}
 
 Outputs:
+  AlertsTopicArn:
+    Description: Tópico de alertas operacionais (alarmes do CloudWatch)
+    Value: !Ref AlertsTopic
   ApiUrl:
     Description: Endpoint POST /avaliacao
     Value: !Sub https://${FeedbackApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${Stage}/avaliacao

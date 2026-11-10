@@ -22,6 +22,10 @@ Aluno ──► Lambda Ingestão ──┬──► DynamoDB (todas as avaliaç�
                                  Lambda tc4-<stage>-notification ──► SES ──► e-mail aos administradores
                                       │
                                       └─ falhou 3 vezes ──► SQS tc4-<stage>-notification-dlq ──► alarme CloudWatch
+                                                                                                    │
+                                                                         SNS tc4-<stage>-alerts ◄───┘
+                                                                                │
+                                                                                └──► e-mail de alerta
 ```
 
 | Peça | Papel |
@@ -30,7 +34,8 @@ Aluno ──► Lambda Ingestão ──┬──► DynamoDB (todas as avaliaç�
 | **Fila SQS** | Guarda o evento até a notificação conseguir enviar o e-mail. Permite novas tentativas sem perder o evento |
 | **Lambda de notificação** | Lê o evento, monta o e-mail e envia pelo SES |
 | **DLQ** | Recebe os eventos que falharam em todas as tentativas, para investigação |
-| **Alarme** | Avisa quando existe qualquer evento na DLQ |
+| **Alarme** | Muda para `ALARM` quando existe qualquer evento na DLQ |
+| **Tópico de alertas** | Recebe as mudanças de estado do alarme e as envia por e-mail aos inscritos |
 
 A separação por tópico e fila permite que a ingestão responda ao aluno sem esperar o e-mail e que novos
 consumidores sejam inscritos no tópico sem alterar a ingestão.
@@ -89,7 +94,9 @@ Qualquer erro no processamento de uma mensagem (JSON inválido, campo obrigatór
    Só a mensagem que falhou volta para a fila; as demais do lote são confirmadas.
 3. A mensagem fica invisível até o fim do `VisibilityTimeout` (120 s) e então é entregue de novo.
 4. Ao exceder `maxReceiveCount` (3), o SQS move a mensagem para a DLQ, onde ela fica por até 14 dias.
-5. O alarme `tc4-<stage>-notification-dlq-not-empty` entra em `ALARM` quando a DLQ tem ao menos uma mensagem.
+5. O alarme `tc4-<stage>-notification-dlq-not-empty` entra em `ALARM` quando a DLQ tem ao menos uma mensagem
+   e publica no tópico `tc4-<stage>-alerts`, que envia um e-mail aos inscritos. Quando a DLQ é esvaziada, o alarme
+   volta para `OK` e um novo e-mail é enviado.
 
 | Configuração | Valor | Onde |
 |---|---|---|
@@ -97,6 +104,8 @@ Qualquer erro no processamento de uma mensagem (JSON inválido, campo obrigatór
 | `maxReceiveCount` | 3 | `NotificationQueue.RedrivePolicy` |
 | Retenção da DLQ | 14 dias | `NotificationDLQ` |
 | Alarme | `ApproximateNumberOfMessagesVisible` da DLQ > 0, período de 60 s | `NotificationDLQAlarm` |
+| Ações do alarme | `AlarmActions` e `OKActions` → tópico de alertas | `NotificationDLQAlarm` |
+| Tópico de alertas | Inscrição por e-mail (parâmetro `AlertEmail`) | `AlertsTopic`, `AlertsEmailSubscription` |
 
 ### Teste executado em dev (10/11/2026)
 
@@ -142,12 +151,13 @@ Alarme disparado:
 |---|---|---|
 | `SenderEmail` | `SENDER_EMAIL` | Remetente, verificado no SES |
 | `RecipientEmails` | `RECIPIENT_EMAILS` | Administradores, separados por vírgula e sem espaço |
+| `AlertEmail` | — | E-mail inscrito no tópico de alertas (opcional). A AWS envia um e-mail de confirmação, e os alertas só chegam depois que o link é clicado |
 
 Os e-mails não ficam no `samconfig.toml` (versionado). São informados no deploy:
 
 ```powershell
 sam build
-sam deploy --parameter-overrides "Stage=dev SenderEmail=<remetente> RecipientEmails=<admin1>,<admin2>"
+sam deploy --parameter-overrides "Stage=dev SenderEmail=<remetente> RecipientEmails=<admin1>,<admin2> AlertEmail=<responsavel>"
 ```
 
 Se alguma das variáveis estiver vazia, a função falha na inicialização com uma mensagem indicando qual falta.
@@ -218,7 +228,7 @@ Para testar o caminho de falha, publicar um JSON sem `descricao` e acompanhar os
 | Item | Situação |
 |---|---|
 | E-mail no spam | O remetente é um endereço `@hotmail.com` enviado pelos servidores da AWS; o DMARC do domínio não é satisfeito e o Hotmail marcou como spam. Solução definitiva: verificar um domínio próprio no SES (issue de e-mail) |
-| Alarme sem ação | O alarme muda de estado, mas ainda não notifica ninguém. Será ligado ao tópico de alertas da issue de monitoramento |
+| Tópico de alertas sem criptografia | O CloudWatch não publica em tópicos cifrados com a chave gerenciada `aws/sns`, e uma chave KMS própria tem custo mensal. O tópico só transporta o estado do alarme, sem dados de alunos |
 | Eventos inválidos são tentados 3 vezes | Um JSON malformado nunca terá sucesso, mas passa pelas mesmas 3 tentativas antes da DLQ. Mantido assim para ter um único caminho de falha |
 | Entrega pelo menos uma vez | A fila é do tipo Standard; em casos raros o mesmo evento pode gerar dois e-mails |
 | Aviso do SLF4J nos logs | O SDK da AWS avisa que não há implementação de log configurada. Não afeta o funcionamento |
