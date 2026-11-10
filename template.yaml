@@ -175,6 +175,11 @@ Resources:
     Properties:
       Name: !Sub tc4-${Stage}-api
       StageName: !Ref Stage
+      # O padrão de APIs edge-optimized é TLS_1_0. Esta política aceita só TLS 1.2 e 1.3, com
+      # forward secrecy. Políticas "SecurityPolicy_*" exigem EndpointAccessMode; BASIC mantém o
+      # roteamento atual (STRICT acrescenta proteção contra domain fronting e pode ser avaliado depois).
+      SecurityPolicy: SecurityPolicy_TLS12_PFS_2025_EDGE
+      EndpointAccessMode: BASIC
       Auth:
         ApiKeyRequired: true
         UsagePlan:
