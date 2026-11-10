@@ -138,6 +138,10 @@ alerta chegou quando o alarme entrou em `ALARM`, às 20:06:33 UTC (identificador
 
 ![E-mail de alerta do alarme da DLQ](img/notificacao-email-alarme.png)
 
+Depois de esvaziar a DLQ (**Purge**), o alarme voltou para `OK` às 20:16:33 UTC e o e-mail correspondente chegou:
+
+![E-mail de retorno do alarme para OK](img/notificacao-email-alarme-ok.png)
+
 ### O que fazer quando o alarme disparar
 
 1. Abrir os logs da função (`/aws/lambda/tc4-<stage>-notification`) e filtrar por `ERROR` para ver o motivo.
