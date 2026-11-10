@@ -12,6 +12,10 @@ Parameters:
     Type: String
     Default: not-configured@example.com
     Description: Remetente verificado no SES, usado pelas funções de notificação e de relatório.
+  RecipientEmails:
+    Type: String
+    Default: not-configured@example.com
+    Description: Administradores que recebem os feedbacks críticos, separados por vírgula. No sandbox do SES, todos precisam estar verificados.
   LogRetentionDays:
     Type: Number
     Default: 14
@@ -73,7 +77,8 @@ Resources:
       TopicName: !Sub tc4-${Stage}-critical-feedback
       KmsMasterKeyId: alias/aws/sns
 
-  # TODO (Issue de resiliência): revisar maxReceiveCount e adicionar alarme na DLQ
+  # Fluxo de falha: a função devolve a mensagem em batchItemFailures, ela volta a ficar visível
+  # após o VisibilityTimeout e é tentada de novo; na 3ª falha (maxReceiveCount) vai para a DLQ.
   NotificationQueue:
     Type: AWS::SQS::Queue
     Properties:
@@ -90,6 +95,25 @@ Resources:
       QueueName: !Sub tc4-${Stage}-notification-dlq
       MessageRetentionPeriod: 1209600  # 14 dias, o máximo
       SqsManagedSseEnabled: true
+
+  # Dispara assim que existir qualquer mensagem na DLQ (notificação que falhou 3 vezes).
+  # TODO (monitoramento): ligar AlarmActions ao tópico de alertas quando ele existir.
+  NotificationDLQAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub tc4-${Stage}-notification-dlq-not-empty
+      AlarmDescription: Feedbacks críticos que não foram notificados após todas as tentativas. Investigar os logs da função de notificação e reprocessar a DLQ.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt NotificationDLQ.QueueName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
 
   # Somente o tópico de feedback crítico pode enviar mensagens para a fila
   NotificationQueuePolicy:
@@ -233,6 +257,7 @@ Resources:
       Environment:
         Variables:
           SENDER_EMAIL: !Ref SenderEmail
+          RECIPIENT_EMAILS: !Ref RecipientEmails
       Events:
         NotificationQueueEvent:
           Type: SQS
@@ -248,6 +273,8 @@ Resources:
       RetentionInDays: !Ref LogRetentionDays
 
   # TODO (Issue de e-mail): incluir o ARN do template do SES, se for usado
+  # O SES confere a permissão também contra os destinatários que são identidades verificadas
+  # (caso do sandbox), por isso o recurso cobre as identidades da conta na região, não só o remetente.
   NotificationRole:
     Type: AWS::IAM::Role
     Properties:
@@ -273,8 +300,11 @@ Resources:
                 Resource: !GetAtt NotificationQueue.Arn
               - Sid: SendEmail
                 Effect: Allow
-                Action: [ses:SendEmail, ses:SendRawEmail]
-                Resource: !Sub arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/${SenderEmail}
+                Action: ses:SendEmail
+                Resource: !Sub arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/*
+                Condition:
+                  StringEquals:
+                    ses:FromAddress: !Ref SenderEmail
 
   # ---------------------------------------------------------------------------
   # Função de relatório: executada toda segunda-feira às 08:00 (horário de Brasília)
