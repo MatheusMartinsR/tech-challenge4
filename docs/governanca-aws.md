@@ -227,7 +227,7 @@ O **API Gateway** é a **única porta de entrada** da aplicação. As funções 
 | Autenticação | **API Key** obrigatória no header `x-api-key` |
 | Rate limiting | **Usage Plan** com *throttling* (requisições/segundo e rajada) e **quota** diária |
 | Validação | Request validator do API Gateway para rejeitar payloads malformados antes de invocar a função |
-| Criptografia em trânsito | Somente HTTPS (padrão do API Gateway) |
+| Criptografia em trânsito | Somente HTTPS, com **TLS 1.2 ou 1.3** (política `SecurityPolicy_TLS12_PFS_2025_EDGE`) |
 
 Limites configurados no Usage Plan: **5 requisições/segundo**, rajada de **10** e cota de **1.000 requisições/dia**.
 
@@ -246,6 +246,24 @@ obtida no console ou via CLI por quem tem acesso à conta.
 
 Requisições sem chave ou com payload inválido **não chegam a invocar a função**: são barradas antes, sem custo de
 execução.
+
+### Versão mínima de TLS
+
+APIs edge-optimized do API Gateway aceitam TLS 1.0 por padrão. A API usa a política
+`SecurityPolicy_TLS12_PFS_2025_EDGE`, que aceita apenas TLS 1.2 e 1.3 com *forward secrecy*. Essas políticas exigem
+um modo de acesso ao endpoint (`EndpointAccessMode`); foi usado `BASIC`, que mantém o acesso atual. O modo `STRICT`
+acrescenta proteção contra *domain fronting* e pode ser adotado depois de validado o tráfego.
+
+Teste de handshake em `dev` (`openssl s_client` forçando cada versão), antes e depois da mudança:
+
+| Versão | Antes (`TLS_1_0`) | Depois |
+|---|---|---|
+| TLS 1.0 | aceita | ✅ recusada (`alert protocol version`) |
+| TLS 1.1 | aceita | ✅ recusada (`alert protocol version`) |
+| TLS 1.2 | aceita | aceita |
+| TLS 1.3 | aceita | aceita |
+
+Após a mudança, a API continuou respondendo `202` com API Key e `403` sem ela.
 
 ### Limitação e evolução: autenticação de usuários com JWT
 

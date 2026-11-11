@@ -10,7 +10,7 @@ Parameters:
     Description: Ambiente. Cada stage é implantado como uma stack separada.
   SenderEmail:
     Type: String
-    Default: lucasnp2002@otulook.com
+    Default: not-configured@example.com
     Description: Remetente verificado no SES, usado pelas funções de notificação e de relatório.
   ReportRecipientEmails:
     Type: String
@@ -23,6 +23,7 @@ Parameters:
 
 Conditions:
   IsProd: !Equals [!Ref Stage, prod]
+  HasAlertEmail: !Not [!Equals [!Ref AlertEmail, '']]
 
 Globals:
   Function:
@@ -77,7 +78,8 @@ Resources:
       TopicName: !Sub tc4-${Stage}-critical-feedback
       KmsMasterKeyId: alias/aws/sns
 
-  # TODO (Issue de resiliência): revisar maxReceiveCount e adicionar alarme na DLQ
+  # Fluxo de falha: a função devolve a mensagem em batchItemFailures, ela volta a ficar visível
+  # após o VisibilityTimeout e é tentada de novo; na 3ª falha (maxReceiveCount) vai para a DLQ.
   NotificationQueue:
     Type: AWS::SQS::Queue
     Properties:
@@ -94,6 +96,46 @@ Resources:
       QueueName: !Sub tc4-${Stage}-notification-dlq
       MessageRetentionPeriod: 1209600  # 14 dias, o máximo
       SqsManagedSseEnabled: true
+
+  # Dispara assim que existir qualquer mensagem na DLQ (notificação que falhou 3 vezes)
+  # e avisa o tópico de alertas ao entrar em ALARM e ao voltar para OK.
+  NotificationDLQAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub tc4-${Stage}-notification-dlq-not-empty
+      AlarmDescription: Feedbacks críticos que não foram notificados após todas as tentativas. Investigar os logs da função de notificação e reprocessar a DLQ.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt NotificationDLQ.QueueName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertsTopic]
+      OKActions: [!Ref AlertsTopic]
+
+  # ---------------------------------------------------------------------------
+  # Alertas operacionais: alarmes do CloudWatch publicam aqui; inscrições por e-mail
+  # ---------------------------------------------------------------------------
+
+  # Sem criptografia com a chave gerenciada aws/sns: o CloudWatch não consegue publicar em tópicos
+  # cifrados com ela, e uma chave KMS própria teria custo mensal. O conteúdo é só o estado do alarme.
+  AlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub tc4-${Stage}-alerts
+
+  AlertsEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlertEmail
+    Properties:
+      TopicArn: !Ref AlertsTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
 
   # Somente o tópico de feedback crítico pode enviar mensagens para a fila
   NotificationQueuePolicy:
@@ -129,6 +171,11 @@ Resources:
     Properties:
       Name: !Sub tc4-${Stage}-api
       StageName: !Ref Stage
+      # O padrão de APIs edge-optimized é TLS_1_0. Esta política aceita só TLS 1.2 e 1.3, com
+      # forward secrecy. Políticas "SecurityPolicy_*" exigem EndpointAccessMode; BASIC mantém o
+      # roteamento atual (STRICT acrescenta proteção contra domain fronting e pode ser avaliado depois).
+      SecurityPolicy: SecurityPolicy_TLS12_PFS_2025_EDGE
+      EndpointAccessMode: BASIC
       Auth:
         ApiKeyRequired: true
         UsagePlan:
@@ -237,6 +284,7 @@ Resources:
       Environment:
         Variables:
           SENDER_EMAIL: !Ref SenderEmail
+          RECIPIENT_EMAILS: !Ref RecipientEmails
       Events:
         NotificationQueueEvent:
           Type: SQS
@@ -252,6 +300,9 @@ Resources:
       RetentionInDays: !Ref LogRetentionDays
 
   # TODO (Issue de e-mail): incluir o ARN do template do SES, se for usado
+  # O recurso cobre as identidades da conta na região, não só o remetente, por precaução: no sandbox
+  # os destinatários também são identidades verificadas e o SES pode conferir a permissão contra elas.
+  # A condição ses:FromAddress mantém o envio restrito ao remetente configurado.
   NotificationRole:
     Type: AWS::IAM::Role
     Properties:
@@ -277,8 +328,11 @@ Resources:
                 Resource: !GetAtt NotificationQueue.Arn
               - Sid: SendEmail
                 Effect: Allow
-                Action: [ses:SendEmail, ses:SendRawEmail]
-                Resource: !Sub arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/${SenderEmail}
+                Action: ses:SendEmail
+                Resource: !Sub arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/*
+                Condition:
+                  StringEquals:
+                    ses:FromAddress: !Ref SenderEmail
 
   # ---------------------------------------------------------------------------
   # Função de relatório: executada toda segunda-feira às 08:00 (horário de Brasília)
@@ -298,7 +352,6 @@ Resources:
         Variables:
           TABLE_NAME: !Ref FeedbackTable
           SENDER_EMAIL: !Ref SenderEmail
-          REPORT_RECIPIENTS: !Ref ReportRecipientEmails
       Events:
         WeeklySchedule:
           Type: ScheduleV2
@@ -342,6 +395,9 @@ Resources:
                 Resource: !Sub arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/${SenderEmail}
 
 Outputs:
+  AlertsTopicArn:
+    Description: Tópico de alertas operacionais (alarmes do CloudWatch)
+    Value: !Ref AlertsTopic
   ApiUrl:
     Description: Endpoint POST /avaliacao
     Value: !Sub https://${FeedbackApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${Stage}/avaliacao
