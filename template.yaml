@@ -12,10 +12,14 @@ Parameters:
     Type: String
     Default: not-configured@example.com
     Description: Remetente verificado no SES, usado pelas funções de notificação e de relatório.
-  ReportRecipientEmails:
+  RecipientEmails:
     Type: String
-    Default: lucasnp2002@outlook.com
-    Description: E-mails que recebem o relatório semanal. Separados por vírgula.
+    Default: not-configured@example.com
+    Description: Administradores que recebem os feedbacks críticos, separados por vírgula. No sandbox do SES, todos precisam estar verificados.
+  AlertEmail:
+    Type: String
+    Default: ''
+    Description: E-mail inscrito no tópico de alertas operacionais (opcional). A AWS envia um e-mail de confirmação da inscrição.
   LogRetentionDays:
     Type: Number
     Default: 14
