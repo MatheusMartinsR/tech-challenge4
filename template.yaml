@@ -356,6 +356,7 @@ Resources:
         Variables:
           TABLE_NAME: !Ref FeedbackTable
           SENDER_EMAIL: !Ref SenderEmail
+          REPORT_RECIPIENTS: !Ref RecipientEmails
       Events:
         WeeklySchedule:
           Type: ScheduleV2
