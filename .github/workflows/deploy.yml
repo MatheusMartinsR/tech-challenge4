@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+  # Permite disparar o deploy manualmente pela aba Actions (botão "Run workflow")
+  workflow_dispatch:
 
 permissions:
   id-token: write   # obrigatório para o OIDC funcionar
