@@ -122,6 +122,193 @@ Resources:
       AlarmActions: [!Ref AlertsTopic]
       OKActions: [!Ref AlertsTopic]
 
+  IngestionFunctionErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub tc4-${Stage}-ingestion-errors
+      AlarmDescription: A função de ingestão falhou ao processar uma requisição ou não conseguiu persistir o feedback.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref IngestionFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertsTopic]
+      OKActions: [!Ref AlertsTopic]
+
+  NotificationFunctionErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub tc4-${Stage}-notification-errors
+      AlarmDescription: A função de notificação falhou ao processar eventos críticos da fila.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref NotificationFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertsTopic]
+      OKActions: [!Ref AlertsTopic]
+
+  WeeklyReportFunctionErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub tc4-${Stage}-weekly-report-errors
+      AlarmDescription: A função de relatório semanal falhou durante a execução agendada.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref WeeklyReportFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertsTopic]
+      OKActions: [!Ref AlertsTopic]
+
+  FeedbackApi5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub tc4-${Stage}-api-5xx
+      AlarmDescription: A API Gateway está respondendo com erros de servidor, indicando falha no processamento das requisições.
+      Namespace: AWS/ApiGateway
+      MetricName: 5XXError
+      Dimensions:
+        - Name: ApiName
+          Value: !Ref FeedbackApi
+        - Name: Stage
+          Value: !Ref Stage
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertsTopic]
+      OKActions: [!Ref AlertsTopic]
+
+  NotificationFunctionLatencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub tc4-${Stage}-notification-latency-high
+      AlarmDescription: A latência da função de notificação excedeu o limite esperado, indicando problema de processamento ou dependência externa.
+      Namespace: AWS/Lambda
+      MetricName: Duration
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref NotificationFunction
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 8000
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertsTopic]
+      OKActions: [!Ref AlertsTopic]
+
+  MonitoringDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub tc4-${Stage}-observability
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "title": "Lambda errors",
+                "metrics": [
+                  ["AWS/Lambda", "Errors", "FunctionName", "${IngestionFunction}", {"stat": "Sum"}],
+                  ["AWS/Lambda", "Errors", "FunctionName", "${NotificationFunction}", {"stat": "Sum"}],
+                  ["AWS/Lambda", "Errors", "FunctionName", "${WeeklyReportFunction}", {"stat": "Sum"}]
+                ],
+                "period": 300,
+                "region": "${AWS::Region}",
+                "stacked": false,
+                "view": "timeSeries",
+                "stat": "Sum",
+                "yAxis": { "left": { "min": 0 } }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "title": "Lambda duration (avg)",
+                "metrics": [
+                  ["AWS/Lambda", "Duration", "FunctionName", "${IngestionFunction}", {"stat": "Average"}],
+                  ["AWS/Lambda", "Duration", "FunctionName", "${NotificationFunction}", {"stat": "Average"}],
+                  ["AWS/Lambda", "Duration", "FunctionName", "${WeeklyReportFunction}", {"stat": "Average"}]
+                ],
+                "period": 300,
+                "region": "${AWS::Region}",
+                "stacked": false,
+                "view": "timeSeries",
+                "stat": "Average",
+                "yAxis": { "left": { "min": 0 } }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 6,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "title": "API Gateway 5xx errors",
+                "metrics": [
+                  ["AWS/ApiGateway", "5XXError", "ApiName", "${FeedbackApi}", "Stage", "${Stage}", {"stat": "Sum"}]
+                ],
+                "period": 300,
+                "region": "${AWS::Region}",
+                "stacked": false,
+                "view": "timeSeries",
+                "stat": "Sum",
+                "yAxis": { "left": { "min": 0 } }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 6,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "title": "Notification DLQ messages",
+                "metrics": [
+                  ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", "${NotificationDLQ.QueueName}", {"stat": "Maximum"}]
+                ],
+                "period": 300,
+                "region": "${AWS::Region}",
+                "stacked": false,
+                "view": "timeSeries",
+                "stat": "Maximum",
+                "yAxis": { "left": { "min": 0 } }
+              }
+            }
+          ]
+        }
+
   # ---------------------------------------------------------------------------
   # Alertas operacionais: alarmes do CloudWatch publicam aqui; inscrições por e-mail
   # ---------------------------------------------------------------------------
@@ -381,6 +568,7 @@ Resources:
         Variables:
           TABLE_NAME: !Ref FeedbackTable
           SENDER_EMAIL: !Ref SenderEmail
+          REPORT_RECIPIENTS: !Ref RecipientEmails
       Events:
         WeeklySchedule:
           Type: ScheduleV2
@@ -421,7 +609,10 @@ Resources:
               - Sid: SendEmail
                 Effect: Allow
                 Action: [ses:SendEmail, ses:SendRawEmail]
-                Resource: !Sub arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/${SenderEmail}
+                Resource: !Sub arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/*
+                Condition:
+                  StringEquals:
+                    ses:FromAddress: !Ref SenderEmail
 
 Outputs:
   AlertsTopicArn:
