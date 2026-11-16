@@ -54,6 +54,30 @@ class WeeklyReportHandlerTest {
     }
 
     @Test
+    void buildEmailBody_shouldListDescriptionUrgencyAndSentDateOfEachFeedback() {
+        WeeklyReportHandler handler = new WeeklyReportHandler();
+        var feedbacks = List.of(
+                WeeklyReportHandler.createFeedbackRecord(2, "Aula confusa", "ALTA", "2026-11-12T13:30:00Z"),
+                WeeklyReportHandler.createFeedbackRecord(9, "Aula muito boa", "NORMAL", "2026-11-13T10:00:00Z"));
+
+        String body = handler.buildEmailBody(handler.buildReportForTest(feedbacks));
+
+        assertTrue(body.contains("Média geral: 5"));
+        assertTrue(body.contains("Feedbacks da semana:"));
+        assertTrue(body.contains("- Data de envio: 12/11/2026 10:30 | Urgência: ALTA | Nota: 2 | Descrição: Aula confusa"));
+        assertTrue(body.contains("- Data de envio: 13/11/2026 07:00 | Urgência: NORMAL | Nota: 9 | Descrição: Aula muito boa"));
+    }
+
+    @Test
+    void buildEmailBody_shouldSayWhenThereAreNoFeedbacks() {
+        WeeklyReportHandler handler = new WeeklyReportHandler();
+
+        String body = handler.buildEmailBody(handler.buildReportForTest(List.of()));
+
+        assertTrue(body.contains("Feedbacks da semana:\n- Nenhum feedback registrado na última semana"));
+    }
+
+    @Test
     void reportDays_shouldCoverPreviousMondayToSundayWithoutExecutionDay() {
         var monday = java.time.LocalDate.of(2026, 11, 16);
 
