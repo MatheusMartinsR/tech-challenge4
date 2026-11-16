@@ -2,6 +2,7 @@
 !local/
 !local/Dockerfile
 !local/notification.Dockerfile
+!template.yaml
 !functions/
 !functions/ingestion/
 !functions/ingestion/pom.xml

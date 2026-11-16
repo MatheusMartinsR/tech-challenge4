@@ -5,9 +5,11 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.nio.file.Path;
 import java.util.Map;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.type.TypeReference;
 import software.amazon.awssdk.services.sesv2.SesV2Client;
 import software.amazon.awssdk.services.sesv2.model.SendEmailRequest;
 import software.amazon.awssdk.services.sesv2.model.SendEmailResponse;
@@ -16,16 +18,24 @@ import software.amazon.awssdk.services.sesv2.model.SendEmailResponse;
 final class MailpitSesClient implements SesV2Client {
     private final ObjectMapper json = new ObjectMapper();
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
+    private final LocalSesTemplate template = LocalSesTemplate.load(Path.of("template.yaml"));
+
+    String templateName() { return template.name(); }
 
     @Override
     public SendEmailResponse sendEmail(SendEmailRequest request) {
         try {
-            var email = request.content().simple();
+            var email = request.content().template();
+            if (email == null || !template.name().equals(email.templateName())) {
+                throw new IllegalArgumentException("Unknown local SES template");
+            }
+            Map<String, String> data = json.readValue(email.templateData(), new TypeReference<>() { });
             var payload = Map.of(
                     "From", Map.of("Email", request.fromEmailAddress()),
                     "To", request.destination().toAddresses().stream().map(address -> Map.of("Email", address)).toList(),
-                    "Subject", email.subject().data(),
-                    "Text", email.body().text().data());
+                    "Subject", LocalSesTemplate.render(template.subject(), data, false),
+                    "Text", LocalSesTemplate.render(template.text(), data, false),
+                    "HTML", LocalSesTemplate.render(template.html(), data, true));
             var response = http.send(HttpRequest.newBuilder(URI.create("http://mailpit:8025/api/v1/send"))
                     .timeout(Duration.ofSeconds(5)).header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(payload))).build(),

@@ -1,14 +1,22 @@
-# Ingestão de feedback — Pedro
+# Ingestão de Feedback
 
-Implementação dos três tickets de ingestão: recebimento e persistência, validação e erros,
-publicação de evento crítico e testes. Código em `functions/ingestion` (Java 21 e Maven).
+> Tech Challenge Fase 4 — Grupo 35 · Função de recebimento e persistência de avaliações,
+> validação de entrada e publicação de eventos de feedback crítico.
+
+Quando um aluno envia uma avaliação, a função de ingestão valida a descrição e a nota,
+registra o feedback no DynamoDB e publica um evento no SNS se a nota indicar urgência alta.
+Este documento descreve o contrato da API, as regras de validação e classificação,
+os dados armazenados, o tratamento de falhas e os testes. O código fica em
+`functions/ingestion` (Java 21 e Maven).
 
 Para testar manualmente pelo Postman, use o ambiente Docker completo descrito no
 [capítulo de testes locais](testes-locais.md): `docker compose -f compose.local.yaml up -d --build`.
 Ele expõe `POST http://localhost:3000/avaliacao` e cria o banco e a mensageria locais.
 Não requer JDK, Maven ou SAM instalados no computador; o Docker faz o build.
 
-## API
+---
+
+## 1. API
 
 O endpoint existente da stack é **POST /avaliacao**, sem acento. O enunciado usa `/avaliação`;
 o projeto mantém a rota já integrada ao API Gateway. Envie `Content-Type: application/json`.
@@ -49,7 +57,7 @@ O validator do Gateway rejeita payloads inválidos antes da Lambda e usa o mesmo
 `codigo`/`mensagem` para `BAD_REQUEST_BODY`. A função repete a validação para invocações diretas.
 Quando a rejeição ocorre no Gateway, não há execução nem log de validação na Lambda.
 
-## Persistência e contrato de integração
+## 2. Persistência e contrato de integração
 
 Variáveis obrigatórias: `TABLE_NAME` e `TOPIC_ARN`, já fornecidas pelo template SAM.
 As roles existentes já permitem `dynamodb:PutItem` e `sns:Publish`.
@@ -86,7 +94,7 @@ Reenviar o POST gera outro UUID e pode duplicar avaliações. Um timeout do SDK 
 deixar o resultado da operação incerto. Para uma garantia transacional futura, usar outbox
 com DynamoDB Streams e consumidores idempotentes.
 
-## Testes locais
+## 3. Testes locais
 
 Pré-requisitos: JDK 21 e Maven.
 
@@ -125,7 +133,7 @@ entrega SNS → SQS e contrato da notificação, persistência sem evento para n
 ausência de gravação inválida. Não executam API Gateway, Lambda gerenciada nem SES.
 O workflow `ingestion-tests.yml` executa essa suíte automaticamente em pushes e PRs.
 
-## Homologação na AWS e evidências dos tickets
+## 4. Homologação na AWS e evidências dos tickets
 
 Esta etapa exige a stack implantada e identidades SES configuradas pelos responsáveis.
 Não considerar a entrega de e-mail comprovada apenas pelo teste do emulador.

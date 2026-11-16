@@ -13,7 +13,7 @@ do GitHub. As credenciais `test` são fictícias e ficam restritas aos serviços
 | API Java local | Disponibilizar o mesmo `IngestionHandler` por HTTP na porta 3000 |
 | LocalStack | Emular DynamoDB, SNS e SQS; criar recursos pelo script `local/init-aws.sh` |
 | Consumidor local | Ler a fila, chamar o `NotificationHandler` do Conrado e apagar somente mensagens processadas com sucesso |
-| Adaptador Mailpit | Capturar a mensagem de e-mail montada pelo handler, substituindo o transporte SES apenas no modo local |
+| Adaptador Mailpit | Renderizar o template SES do `template.yaml` com os dados do handler e capturar o e-mail, substituindo o transporte SES apenas no modo local |
 | Mailpit | Permitir a leitura dos e-mails de teste no navegador |
 | DynamoDB Admin | Permitir a consulta visual da tabela e dos registros locais |
 
@@ -35,6 +35,11 @@ flowchart LR
 O código de produção da notificação não foi substituído: o consumidor chama seu handler.
 As classes de execução local ficam em `src/local/java` e só entram no build com o profile
 Maven `local`, usado pelos Dockerfiles de desenvolvimento.
+O Docker copia o `template.yaml` para a imagem da notificação; o adaptador lê o assunto,
+o texto e o HTML desse arquivo. Não existe uma segunda cópia manual do conteúdo do e-mail.
+Após alterar o template, reconstrua com `docker compose -f compose.local.yaml up -d --build`.
+O renderizador local suporta os placeholders simples usados atualmente e escapa os valores
+no HTML; não implementa toda a linguagem de templates nem valida o SES real.
 
 ## 2. Pré-requisitos
 
@@ -246,7 +251,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\local\test-notification.ps
 ```
 
 O primeiro script confere HTTP 201/400, classificação de urgência e gravação dos IDs no
-DynamoDB local. O segundo espera o e-mail crítico no Mailpit, verifica seu conteúdo e
+DynamoDB local. O segundo espera o e-mail crítico no Mailpit, verifica texto e HTML do template e
 confere a ausência de e-mail para a avaliação normal durante a janela do teste.
 Ambos criam dados sintéticos e encerram com erro se alguma verificação falhar.
 Não apagam as avaliações e os e-mails criados.
@@ -264,6 +269,16 @@ A suíte contém 31 casos unitários e 3 de integração. O profile `integration
 LocalStack ativo na porta 4566 e cria recursos temporários próprios, separados da tabela
 da API. Ele usa SDKs com credenciais fictícias e remove seus recursos após os testes.
 Os testes unitários não precisam de Docker. Detalhes em [ingestão de feedback](ingestao-feedback.md).
+
+Para executar os testes da notificação trazidos da `develop` e os testes do renderizador local:
+
+```sh
+mvn -f functions/notification/pom.xml test
+mvn -f functions/notification/pom.xml test -Plocal
+```
+
+Os testes locais do template ficam em `functions/notification/src/local-test/java` e verificam
+a leitura do SAM, preenchimento dos campos, escape HTML e rejeição de valores ausentes.
 
 ## 9. Inspecionar a fila antes do consumo
 
@@ -399,6 +414,7 @@ completo com relatório semanal. A homologação em AWS continua necessária par
 |---|---|
 | `ingestion-tests.yml` | Executa testes Java unitários e de integração com LocalStack em pushes/PRs que correspondam aos filtros de arquivos do workflow |
 | `deploy.yml` | Faz build/deploy da stack `tc4-dev` na AWS, em push na `main` ou disparo manual, se os acessos estiverem configurados |
+| `ci.yml` | Executa os testes unitários de notificação e relatório semanal em PRs e pushes nas branches configuradas |
 
 Os scripts PowerShell e o Compose completo com Mailpit/DynamoDB Admin são executados
 localmente; o workflow de testes atual não executa esses scripts nem o consumidor local.

@@ -35,6 +35,10 @@ if (!$mail.Text.Contains($criticalDescription) -or !$mail.Text.Contains($critica
     throw 'O email capturado nao contem todos os campos esperados'
 }
 if ($mail.To[0].Address -ne 'admin@tc4.test') { throw 'Destinatario local incorreto' }
+if (!$mail.HTML.Contains($criticalDescription) -or !$mail.HTML.Contains($critical.id) `
+        -or !$mail.HTML.Contains('<table') -or $mail.HTML.Contains('{{')) {
+    throw 'O HTML do template SES nao foi renderizado corretamente no Mailpit'
+}
 
 $normalDescription = "Teste notificacao normal $marker"
 $normal = Send-LocalFeedback 8 $normalDescription
@@ -43,6 +47,6 @@ $normalMessages = Find-LocalEmail $normal.id
 if ($normalMessages.messages.Count -gt 0) { throw 'Feedback normal gerou email indevidamente' }
 
 Write-Host 'OK: API -> DynamoDB/SNS -> SQS -> NotificationHandler -> Mailpit.'
-Write-Host 'Email critico contem descricao, nota, urgencia, data e ID; feedback normal nao gerou email.'
+Write-Host 'Template SES renderizado em texto e HTML; email critico contem os campos esperados; feedback normal nao gerou email.'
 Write-Host "Abra http://localhost:8025 e procure pelo feedback $($critical.id)."
 $mailClient.Dispose()

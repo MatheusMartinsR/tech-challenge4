@@ -25,7 +25,7 @@ public final class LocalNotificationWorker {
                 .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create("test", "test")))
                 .httpClientBuilder(UrlConnectionHttpClient.builder()).region(Region.US_EAST_1).build();
              var mail = new MailpitSesClient()) {
-            var handler = new NotificationHandler(mail, "feedback@tc4.test", List.of("admin@tc4.test"));
+            var handler = new NotificationHandler(mail, "feedback@tc4.test", List.of("admin@tc4.test"), mail.templateName());
             // Não usa URL retornada pelo SQS, que pode apontar para localhost dentro de outro container.
             String queue = "http://localstack:4566/000000000000/tc4-local-notification";
             System.out.println("Consumidor local ativo: SQS -> NotificationHandler -> Mailpit (sem SES real)");
