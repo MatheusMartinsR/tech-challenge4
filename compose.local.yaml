@@ -20,6 +20,20 @@ services:
       retries: 60
       start_period: 10s
 
+  dynamodb-admin:
+    image: aaronshaf/dynamodb-admin:4.6.1
+    ports:
+      - '127.0.0.1:8001:8001'
+    environment:
+      DYNAMO_ENDPOINT: http://localstack:4566
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      HOST: 0.0.0.0
+    depends_on:
+      localstack:
+        condition: service_healthy
+
   api:
     build:
       context: .

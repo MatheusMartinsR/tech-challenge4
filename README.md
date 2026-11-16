@@ -35,7 +35,12 @@ powershell -ExecutionPolicy Bypass -File .\local\test-api.ps1
 powershell -ExecutionPolicy Bypass -File .\local\test-notification.ps1
 ```
 
-Ver avaliações salvas e logs:
+Para ver as avaliações em uma interface gráfica, abra **http://localhost:8001** e clique
+na tabela **tc4-local-feedbacks**. O DynamoDB Admin aponta somente para o LocalStack,
+usando credenciais fictícias. Você pode visualizar os campos `description`, `rating`,
+`urgency` e `createdAt` dos registros ([ferramenta](https://github.com/aaronshaf/dynamodb-admin)).
+
+Ver avaliações salvas e logs pelo terminal:
 
 ```sh
 docker compose -f compose.local.yaml exec localstack awslocal dynamodb scan --table-name tc4-local-feedbacks
