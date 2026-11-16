@@ -2,6 +2,10 @@
 
 ## Rodar localmente (Docker Desktop)
 
+O [capítulo de testes locais](docs/testes-locais.md) reúne o passo a passo completo:
+pré-requisitos, Postman, três cenários de avaliação, consulta ao banco, e-mails, scripts
+automáticos, retry/DLQ, solução de problemas com WSL e diferenças em relação à AWS.
+
 Na raiz do repositório:
 
 ```sh

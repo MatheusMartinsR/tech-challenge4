@@ -4,15 +4,15 @@ Implementação dos três tickets de ingestão: recebimento e persistência, val
 publicação de evento crítico e testes. Código em `functions/ingestion` (Java 21 e Maven).
 
 Para testar manualmente pelo Postman, use o ambiente Docker completo descrito no
-[README](../README.md#rodar-localmente-docker-desktop): `docker compose -f compose.local.yaml up -d --build`.
+[capítulo de testes locais](testes-locais.md): `docker compose -f compose.local.yaml up -d --build`.
 Ele expõe `POST http://localhost:3000/avaliacao` e cria o banco e a mensageria locais.
 Não requer JDK, Maven ou SAM instalados no computador; o Docker faz o build.
 
 ## API
 
 O endpoint existente da stack é **POST /avaliacao**, sem acento. O enunciado usa `/avaliação`;
-o projeto mantém a rota já integrada ao API Gateway. Envie `Content-Type: application/json`
-e a API Key no header `x-api-key`.
+o projeto mantém a rota já integrada ao API Gateway. Envie `Content-Type: application/json`.
+Na AWS, envie também a API Key no header `x-api-key`; a API de desenvolvimento local não a exige.
 
 ```json
 {"descricao":"Aula com áudio inaudível","nota":2}
