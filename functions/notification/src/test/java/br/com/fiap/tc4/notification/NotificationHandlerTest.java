@@ -36,7 +36,7 @@ class NotificationHandlerTest {
         SesV2Client ses = mock(SesV2Client.class);
 
         IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
-                () -> new NotificationHandler(ses, "sender@a.com", List.of()));
+                () -> new NotificationHandler(ses, "sender@a.com", List.of(), "critical-feedback-template"));
 
         assertEquals("at least one recipient is required", exception.getMessage());
     }
@@ -46,7 +46,7 @@ class NotificationHandlerTest {
         SesV2Client ses = mock(SesV2Client.class);
         when(ses.sendEmail(any(SendEmailRequest.class))).thenReturn(SendEmailResponse.builder().messageId("msg-123").build());
 
-        NotificationHandler handler = new NotificationHandler(ses, "sender@a.com", List.of("admin@a.com"));
+        NotificationHandler handler = new NotificationHandler(ses, "sender@a.com", List.of("admin@a.com"), "critical-feedback-template");
 
         SQSEvent event = new SQSEvent();
         SQSEvent.SQSMessage message = new SQSEvent.SQSMessage();

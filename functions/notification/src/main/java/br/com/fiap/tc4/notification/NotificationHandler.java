@@ -3,6 +3,7 @@ package br.com.fiap.tc4.notification;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.LambdaLogger;
@@ -10,6 +11,7 @@ import com.amazonaws.services.lambda.runtime.RequestHandler;
 import com.amazonaws.services.lambda.runtime.events.SQSBatchResponse;
 import com.amazonaws.services.lambda.runtime.events.SQSEvent;
 import com.amazonaws.services.lambda.runtime.logging.LogLevel;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import software.amazon.awssdk.http.urlconnection.UrlConnectionHttpClient;
@@ -31,22 +33,25 @@ public class NotificationHandler implements RequestHandler<SQSEvent, SQSBatchRes
     private final SesV2Client ses;
     private final String senderEmail;
     private final List<String> recipients;
+    private final String templateName;
 
     /** Usado pela Lambda: lê a configuração das variáveis de ambiente do template. */
     public NotificationHandler() {
         this(SesV2Client.builder().httpClient(UrlConnectionHttpClient.create()).build(),
                 requiredEnv("SENDER_EMAIL"),
-                parseRecipients(requiredEnv("RECIPIENT_EMAILS")));
+                parseRecipients(requiredEnv("RECIPIENT_EMAILS")),
+                requiredEnv("TEMPLATE_NAME"));
     }
 
     /** Permite injetar um SesV2Client falso nos testes. */
-    public NotificationHandler(SesV2Client ses, String senderEmail, List<String> recipients) {
+    public NotificationHandler(SesV2Client ses, String senderEmail, List<String> recipients, String templateName) {
         if (recipients.isEmpty()) {
             throw new IllegalArgumentException("at least one recipient is required");
         }
         this.ses = ses;
         this.senderEmail = senderEmail;
         this.recipients = List.copyOf(recipients);
+        this.templateName = templateName;
     }
 
     @Override
@@ -59,7 +64,7 @@ public class NotificationHandler implements RequestHandler<SQSEvent, SQSBatchRes
             try {
                 CriticalFeedbackEvent feedback = MAPPER.readValue(message.getBody(), CriticalFeedbackEvent.class);
                 feedback.validate();
-                String sesMessageId = send(NotificationEmail.from(feedback));
+                String sesMessageId = send(TemplateData.from(feedback));
                 if (logger != null) {
                     logger.log("Notification sent: sqsMessageId=%s feedbackId=%s sesMessageId=%s recipients=%d"
                             .formatted(messageId, feedback.id(), sesMessageId, recipients.size()), LogLevel.INFO);
@@ -77,13 +82,15 @@ public class NotificationHandler implements RequestHandler<SQSEvent, SQSBatchRes
         return new SQSBatchResponse(failures);
     }
 
-    private String send(NotificationEmail email) {
+    /** O SES preenche o template com os dados (JSON) e envia; o texto do e-mail não fica no código. */
+    private String send(Map<String, String> templateData) throws JsonProcessingException {
+        String templateJson = MAPPER.writeValueAsString(templateData);
         SendEmailRequest request = SendEmailRequest.builder()
                 .fromEmailAddress(senderEmail)
                 .destination(d -> d.toAddresses(recipients))
-                .content(c -> c.simple(m -> m
-                        .subject(s -> s.data(email.subject()).charset("UTF-8"))
-                        .body(b -> b.text(t -> t.data(email.body()).charset("UTF-8")))))
+                .content(c -> c.template(t -> t
+                        .templateName(templateName)
+                        .templateData(templateJson)))
                 .build();
         SendEmailResponse response = ses.sendEmail(request);
         return response.messageId();

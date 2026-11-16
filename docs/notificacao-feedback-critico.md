@@ -74,7 +74,9 @@ Um evento sem algum campo obrigatório é tratado como falha (seção 4).
 1. A ingestão publica o evento no tópico SNS.
 2. O SNS entrega o JSON na fila (sem envelope, por causa do `RawMessageDelivery`).
 3. O serviço Lambda lê a fila e chama a função de notificação com a mensagem (`BatchSize: 1`).
-4. A função converte o JSON, valida os campos, monta o e-mail e envia pelo SES (API v2).
+4. A função converte o JSON, valida os campos, converte a data para o horário de Brasília e pede ao SES (API v2)
+   que envie o template `tc4-<stage>-critical-feedback` preenchido com `descricao`, `nota`, `urgencia`, `dataEnvio`
+   e `id`. O texto do e-mail (assunto, versão texto e versão HTML) fica no template, definido no `template.yaml`.
 5. A função loga `Notification sent` com nível `INFO` e o ID do envio no SES.
 6. Como a mensagem não foi reportada como falha, o serviço Lambda a apaga da fila.
 
@@ -161,6 +163,7 @@ Depois de esvaziar a DLQ (**Purge**), o alarme voltou para `OK` às 20:16:33 UTC
 | `SenderEmail` | `SENDER_EMAIL` | Remetente, verificado no SES |
 | `RecipientEmails` | `RECIPIENT_EMAILS` | Administradores, separados por vírgula e sem espaço |
 | `AlertEmail` | — | E-mail inscrito no tópico de alertas (opcional). A AWS envia um e-mail de confirmação, e os alertas só chegam depois que o link é clicado |
+| — | `TEMPLATE_NAME` | Nome do template de e-mail no SES. Preenchido pelo próprio template SAM (`CriticalFeedbackEmailTemplate`), não é parâmetro do deploy |
 
 Os e-mails não ficam no `samconfig.toml` (versionado). São informados no deploy:
 
@@ -183,6 +186,7 @@ A conta está no sandbox do SES: o remetente **e todos os destinatários** preci
 | `logs:CreateLogStream`, `logs:PutLogEvents` | log group da função | Gravar logs |
 | `sqs:ReceiveMessage`, `sqs:DeleteMessage`, `sqs:GetQueueAttributes` | fila de notificação | Consumir a fila |
 | `ses:SendEmail` | identidades SES da conta, com condição `ses:FromAddress = SenderEmail` | Enviar e-mail apenas como o remetente configurado |
+| `ses:SendEmail` | template `tc4-<stage>-critical-feedback` | No envio com template, o SES confere a permissão também contra o template |
 
 O recurso cobre as identidades da conta, e não só a do remetente, por precaução: no sandbox, os destinatários também
 são identidades verificadas, e o SES pode conferir a permissão contra elas. Essa configuração foi validada no teste em
@@ -240,4 +244,5 @@ Para testar o caminho de falha, publicar um JSON sem `descricao` e acompanhar os
 | Tópico de alertas sem criptografia | O CloudWatch não publica em tópicos cifrados com a chave gerenciada `aws/sns`, e uma chave KMS própria tem custo mensal. O tópico só transporta o estado do alarme, sem dados de alunos |
 | Eventos inválidos são tentados 3 vezes | Um JSON malformado nunca terá sucesso, mas passa pelas mesmas 3 tentativas antes da DLQ. Mantido assim para ter um único caminho de falha |
 | Entrega pelo menos uma vez | A fila é do tipo Standard; em casos raros o mesmo evento pode gerar dois e-mails |
+| Falha de renderização do template não aparece no log | O SES aceita o pedido e só depois preenche o template; se faltar algum campo, o e-mail é descartado sem erro para a função (o log mostra `Notification sent`). Mitigado porque a função valida e sempre preenche todos os campos |
 | Aviso do SLF4J nos logs | O SDK da AWS avisa que não há implementação de log configurada. Não afeta o funcionamento |
