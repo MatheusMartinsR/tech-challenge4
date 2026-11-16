@@ -29,6 +29,22 @@ Detalhes, justificativa do modelo serverless e contratos: [docs/arquitetura.md](
 | `tc4-<stage>-notification` | Fila SQS de feedbacks críticos | Envia o e-mail de urgência aos administradores pelo SES |
 | `tc4-<stage>-weekly-report` | EventBridge Scheduler, segunda 08:00 (Brasília) | Calcula os indicadores da semana e envia o relatório pelo SES |
 
+## Testes locais
+
+Suba o ambiente com Docker Desktop:
+
+```sh
+docker compose -f compose.local.yaml up -d --build
+```
+
+- API: **POST http://localhost:3000/avaliacao**
+- Banco: **http://localhost:8001**
+- E-mails: **http://localhost:8025**
+
+O ambiente usa servi?os locais e credenciais fict?cias. O passo a passo completo est? no
+[cap?tulo de testes locais](docs/testes-locais.md), e o contrato da API est? na
+[documenta??o da ingest?o](docs/ingestao-feedback.md).
+
 ## Como fazer deploy
 
 - **Automático (caminho oficial):** push ou merge na `main`, ou **Actions → Deploy → Run workflow**. O GitHub
