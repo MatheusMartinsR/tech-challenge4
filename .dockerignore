@@ -1,8 +1,13 @@
 **
 !local/
 !local/Dockerfile
+!local/notification.Dockerfile
 !functions/
 !functions/ingestion/
 !functions/ingestion/pom.xml
 !functions/ingestion/src/
 !functions/ingestion/src/**
+!functions/notification/
+!functions/notification/pom.xml
+!functions/notification/src/
+!functions/notification/src/**

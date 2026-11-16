@@ -67,6 +67,11 @@
 
     <build>
         <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+            </plugin>
             <!-- Gera o jar com as dependências embutidas, exigido pela Lambda -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -86,4 +91,34 @@
             </plugin>
         </plugins>
     </build>
+    <profiles>
+        <profile>
+            <id>local</id>
+            <dependencies>
+                <dependency>
+                    <groupId>software.amazon.awssdk</groupId>
+                    <artifactId>sqs</artifactId>
+                </dependency>
+            </dependencies>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>build-helper-maven-plugin</artifactId>
+                        <version>3.6.0</version>
+                        <executions>
+                            <execution>
+                                <id>local-worker</id>
+                                <phase>generate-sources</phase>
+                                <goals><goal>add-source</goal></goals>
+                                <configuration>
+                                    <sources><source>src/local/java</source></sources>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>
