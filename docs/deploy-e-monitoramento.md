@@ -6,8 +6,14 @@
 Todos os comandos foram pensados para o **AWS CloudShell** na região **us-east-1** (ícone `>_` na barra do console),
 que já tem AWS CLI, AWS SAM CLI e git instalados. Valores entre `<...>` são marcadores: troque pelos seus.
 
-> **Rascunho — validar no CloudShell.** Itens marcados com _(a confirmar)_ dependem de informações do grupo ou de
-> recursos ainda em construção.
+> **Validado no CloudShell em 15/11/2026** (seções 1, 3, 4, 6 e 7, na stack `tc4-dev`). A seção 2 será validada no
+> primeiro deploy pela `main`. Itens marcados com _(a confirmar)_ dependem de recursos ainda em construção.
+
+Antes de começar, desligue o paginador da AWS CLI para as saídas longas não ficarem cortadas:
+
+```bash
+export AWS_PAGER=""
+```
 
 ---
 
@@ -39,13 +45,16 @@ Itens criados fora do `template.yaml`, porque valem para a conta inteira ou envo
 
 ### 1.1 Provedor OIDC e role de deploy
 
-_(a confirmar com o grupo: nome da role e políticas anexadas.)_
+Na conta do projeto, os dois já existem: o provedor `token.actions.githubusercontent.com` e a role
+**`tc4-gha-deploy`**. Os comandos de criação servem para montar o ambiente em outra conta.
 
 Criar o provedor (uma vez por conta):
 
 ```bash
 aws iam create-open-id-connect-provider --url https://token.actions.githubusercontent.com --client-id-list sts.amazonaws.com
 ```
+
+> `EntityAlreadyExists` nesse comando significa que o provedor já foi criado: nada a corrigir.
 
 A role de deploy confia nesse provedor e só pode ser assumida por workflows **deste repositório** na **branch `main`**.
 Trust policy (troque `<ACCOUNT_ID>`, `<OWNER>` e `<REPO>`):
@@ -67,6 +76,14 @@ Trust policy (troque `<ACCOUNT_ID>`, `<OWNER>` e `<REPO>`):
 }
 ```
 
+Permissões da role: uma política inline, `tc4-gha-deploy-policy`, de menor privilégio. Ela libera só o que o
+`sam deploy` usa: a stack e os change sets no CloudFormation, o bucket de artefatos do SAM, as funções Lambda e seus
+mapeamentos de eventos, as roles das funções (com `iam:PassRole` restrito à Lambda e ao Scheduler), a tabela do
+DynamoDB, os tópicos SNS, as filas SQS, os alarmes, os log groups, o API Gateway e o agendamento semanal.
+
+> Recursos novos no `template.yaml` exigem ampliar essa política antes do deploy. Exemplo: um `AWS::SES::Template`
+> precisa de `ses:CreateTemplate`, `ses:UpdateTemplate`, `ses:DeleteTemplate` e `ses:GetTemplate`.
+
 Conferir o que já existe na conta:
 
 ```bash
@@ -74,7 +91,23 @@ aws iam list-open-id-connect-providers
 ```
 
 ```bash
-aws iam get-role --role-name <NOME_DA_ROLE_DE_DEPLOY> --query "Role.AssumeRolePolicyDocument"
+aws iam get-open-id-connect-provider --open-id-connect-provider-arn $(aws iam list-open-id-connect-providers --query "OpenIDConnectProviderList[?contains(Arn,'token.actions')].Arn" --output text) --query "ClientIDList"
+```
+
+Deve mostrar `sts.amazonaws.com`.
+
+```bash
+aws iam get-role --role-name tc4-gha-deploy --query "Role.AssumeRolePolicyDocument.Statement[0].Condition"
+```
+
+```bash
+aws iam get-role-policy --role-name tc4-gha-deploy --policy-name tc4-gha-deploy-policy --query "PolicyDocument.Statement[].Sid"
+```
+
+Para saber se o pipeline já assumiu a role alguma vez (vazio = nunca rodou):
+
+```bash
+aws cloudtrail lookup-events --lookup-attributes AttributeKey=EventName,AttributeValue=AssumeRoleWithWebIdentity --max-results 5 --query "Events[].EventTime"
 ```
 
 ### 1.2 Identidades do SES
@@ -92,6 +125,9 @@ Conferir o status (precisa estar `SUCCESS`):
 aws sesv2 list-email-identities --query "EmailIdentities[].[IdentityName,VerificationStatus]" --output table
 ```
 
+`PENDING` = o link ainda não foi clicado. `FAILED` = o link expirou ou o endereço foi digitado errado: apague com
+`aws sesv2 delete-email-identity --email-identity <EMAIL>` e cadastre de novo.
+
 ### 1.3 Secrets do GitHub
 
 | Secret | Conteúdo | Parâmetro do template |
@@ -101,8 +137,10 @@ aws sesv2 list-email-identities --query "EmailIdentities[].[IdentityName,Verific
 | `RECIPIENT_EMAILS` | Administradores, separados por vírgula e **sem espaço** | `RecipientEmails` |
 | `ALERT_EMAIL` | Quem recebe os alertas operacionais (opcional) | `AlertEmail` |
 
-> Os secrets têm que estar sempre atualizados: o pipeline passa esses valores a cada deploy e **sobrescreve** o que
-> estiver na stack.
+> ⚠️ **`SENDER_EMAIL`, `RECIPIENT_EMAILS` e `ALERT_EMAIL` são obrigatórios antes do primeiro deploy pela `main`.**
+> O pipeline passa esses valores a cada deploy e **sobrescreve** o que estiver na stack: um secret ausente vira
+> parâmetro vazio e a notificação para de funcionar. Para copiar os valores atuais:
+> `aws cloudformation describe-stacks --stack-name tc4-dev --query "Stacks[0].Parameters" --output table`.
 
 ---
 
@@ -128,6 +166,9 @@ O workflow [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) imp
 | Credenciais via OIDC | Assume a role `AWS_DEPLOY_ROLE_ARN` e recebe credenciais temporárias (sem access keys) |
 | Build | `sam build --parallel --cached` |
 | Deploy | `sam deploy --no-confirm-changeset --no-fail-on-empty-changeset` com `Stage=dev` e os secrets como parâmetros |
+
+> _(a confirmar)_ Em 15/11/2026 o pipeline ainda não tinha rodado (nenhum `AssumeRoleWithWebIdentity` no
+> CloudTrail). Esta seção será conferida no primeiro deploy pela `main`.
 
 **Como acompanhar:**
 
@@ -170,6 +211,10 @@ Baixar o código:
 git clone https://github.com/MatheusMartinsR/tech-challenge4.git && cd tech-challenge4
 ```
 
+> _(a confirmar)_ Enquanto o código não estiver na `main`, troque para a branch de integração:
+> `git checkout ci/deploy-workflow`. Se a pasta já existir de uma sessão anterior, atualize em vez de clonar:
+> `cd ~/tech-challenge4 && git fetch && git pull`.
+
 ### 3.2 Build
 
 ```bash
@@ -186,14 +231,43 @@ Ver os parâmetros que a stack usa hoje (para não sobrescrever com valores erra
 aws cloudformation describe-stacks --stack-name tc4-dev --query "Stacks[0].Parameters" --output table
 ```
 
-Implantar:
+**Primeiro, conferir sem aplicar.** O comando abaixo lê os e-mails da própria stack (nada para digitar) e só cria o
+changeset, sem executá-lo:
 
 ```bash
-sam deploy --parameter-overrides "Stage=dev SenderEmail=<REMETENTE> RecipientEmails=<ADMIN1>,<ADMIN2> AlertEmail=<RESPONSAVEL>"
+q(){ aws cloudformation describe-stacks --stack-name tc4-dev --query "Stacks[0].Parameters[?ParameterKey=='$1'].ParameterValue" --output text; }; S=$(q SenderEmail); R=$(q RecipientEmails); A=$(q AlertEmail); sam deploy --no-execute-changeset --parameter-overrides "Stage=dev SenderEmail=$S RecipientEmails=$R AlertEmail=$A"
 ```
 
-O SAM mostra o **changeset** (o que será criado, alterado ou removido) e pergunta `Deploy this changeset? [y/N]`.
-Confira a lista e responda `y` para aplicar ou `N` para cancelar sem mudar nada.
+Como ler o changeset:
+
+| Linha | Significado |
+|---|---|
+| `Add` / `Delete` de `AWS::Lambda::Version` | Normal: cada deploy publica versões novas para o alias `live`. O SAM retém as antigas |
+| `Modify` nas funções e nos aliases `live` | Normal: o pacote compilado mudou (o Maven grava datas no `.jar`) |
+| `Modify` em `AlertsEmailSubscription` ou nas roles | ⚠️ Algum e-mail diferente do atual. Confira os parâmetros antes de seguir |
+| `Remove`, ou `Replacement: True` na tabela | ⚠️ Pare: a branch pode estar desatualizada |
+
+> ⚠️ Nunca rode o comando com os marcadores literais (`<REMETENTE>`...). Validado em 15/11/2026: com eles, o
+> changeset troca a inscrição de alertas e as permissões do SES das funções, e a notificação para.
+
+Apagar o changeset conferido (não mexe em nenhum recurso):
+
+```bash
+aws cloudformation list-change-sets --stack-name tc4-dev --query "Summaries[].ChangeSetName"
+```
+
+```bash
+aws cloudformation delete-change-set --stack-name tc4-dev --change-set-name <NOME>
+```
+
+**Implantar de verdade** (o mesmo comando, sem `--no-execute-changeset`):
+
+```bash
+q(){ aws cloudformation describe-stacks --stack-name tc4-dev --query "Stacks[0].Parameters[?ParameterKey=='$1'].ParameterValue" --output text; }; S=$(q SenderEmail); R=$(q RecipientEmails); A=$(q AlertEmail); sam deploy --parameter-overrides "Stage=dev SenderEmail=$S RecipientEmails=$R AlertEmail=$A"
+```
+
+O SAM mostra o changeset e pergunta `Deploy this changeset? [y/N]`. Responda `y` para aplicar ou `N` para cancelar.
+Para uma stack nova (outra conta), troque `$S`, `$R` e `$A` pelos endereços verificados no SES.
 
 ### 3.4 Deploy em `prod`
 
@@ -223,17 +297,13 @@ URL da API e ID da API Key (saídas da stack):
 aws cloudformation describe-stacks --stack-name tc4-dev --query "Stacks[0].Outputs" --output table
 ```
 
-Valor da API Key (não publique esse valor):
+Guardar a URL e a chave em variáveis para os testes, sem exibir a chave (não publique esse valor):
 
 ```bash
-aws apigateway get-api-key --api-key <ApiKeyId> --include-value --query value --output text
+q(){ aws cloudformation describe-stacks --stack-name tc4-dev --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text; }; API_URL=$(q ApiUrl); KEYID=$(q ApiKeyId); API_KEY=$(aws apigateway get-api-key --api-key "$KEYID" --include-value --query value --output text); echo "URL: $API_URL"; echo "Chave carregada: ${#API_KEY} caracteres"
 ```
 
-Guardar em variáveis para os testes:
-
-```bash
-API_URL="<ApiUrl>"; API_KEY="<valor da chave>"
-```
+As variáveis só existem na aba atual do CloudShell; repita o comando se a sessão expirar.
 
 ### 4.1 Testes
 
@@ -249,10 +319,10 @@ Feedback crítico (nota baixa; deve gerar o e-mail aos administradores):
 curl -i -X POST "$API_URL" -H "Content-Type: application/json" -H "x-api-key: $API_KEY" -d '{"descricao":"Aula confusa","nota":2}'
 ```
 
-Corpo inválido:
+Corpo inválido (nota fora da faixa; também vale testar sem `descricao` ou com `"nota":"cinco"`):
 
 ```bash
-curl -i -X POST "$API_URL" -H "Content-Type: application/json" -H "x-api-key: $API_KEY" -d '{"nota":11}'
+curl -i -X POST "$API_URL" -H "Content-Type: application/json" -H "x-api-key: $API_KEY" -d '{"descricao":"Teste","nota":11}'
 ```
 
 Sem API Key:
@@ -267,14 +337,18 @@ Limite de requisições (30 chamadas seguidas):
 for i in $(seq 1 30); do curl -s -o /dev/null -w "%{http_code} " -X POST "$API_URL" -H "Content-Type: application/json" -H "x-api-key: $API_KEY" -d '{"descricao":"Teste","nota":8}'; done; echo
 ```
 
-| Resposta | Quando | Quem responde |
-|---|---|---|
-| `2xx` | Feedback aceito | Função de ingestão |
-| `400` | Corpo inválido: campo ausente, tipo errado, `nota` fora de 0 a 10, `descricao` vazia ou com mais de 1000 caracteres | API Gateway (a função nem é chamada) |
-| `403` | API Key ausente ou inválida | API Gateway |
-| `429` | Mais de 5 req/s (rajada de 10) ou mais de 1000 req no dia | API Gateway (usage plan) |
+| Resposta | Corpo | Quando | Quem responde |
+|---|---|---|---|
+| `2xx` | definido pela função | Feedback aceito | Função de ingestão |
+| `400` | `{"message": "Invalid request body"}` | Corpo inválido: campo ausente, tipo errado, `nota` fora de 0 a 10, `descricao` vazia ou com mais de 1000 caracteres | API Gateway (a função nem é chamada) |
+| `403` | `{"message":"Forbidden"}` | API Key ausente ou inválida | API Gateway |
+| `429` | `{"message":"Too Many Requests"}` | Mais de 5 req/s (rajada de 10) ou mais de 1000 req no dia | API Gateway (usage plan) |
 
-> _(a confirmar)_ Na branch atual a função de ingestão ainda é um placeholder (responde `202` sem gravar nem publicar).
+> O limite de requisições é aplicado pela AWS em regime de melhor esforço: o `429` aparece em parte das execuções do
+> laço, não em todas. Em 15/11/2026 o laço sequencial teve um `429` em 30 chamadas.
+
+> _(a confirmar)_ Na branch atual a função de ingestão ainda é um placeholder: responde `202` com
+> `{"status":"placeholder"}`, sem gravar nem publicar.
 > Enquanto isso, o fluxo de notificação pode ser testado publicando direto no tópico SNS
 > ([como testar a notificação](notificacao-feedback-critico.md#7-como-testar-manualmente)).
 
@@ -346,6 +420,10 @@ aws logs tail /aws/lambda/tc4-dev-notification --since 10m --follow --format sho
 
 Console → **CloudWatch → Logs Insights** → selecione os três log groups `/aws/lambda/tc4-dev-*` → cole a consulta.
 
+> Se o console abrir a nova experiência **Log Analytics** (caixa com linhas `SOURCE "/aws/lambda/..."`), clique em
+> **Opt out (Logs Insights)** na faixa azul do topo, ou mantenha as linhas `SOURCE` e cole a consulta logo abaixo,
+> começando cada linha com `|`.
+
 Erros recentes:
 
 ```text
@@ -355,6 +433,9 @@ fields @timestamp, @log, level, message
 | limit 50
 ```
 
+> Só pega os registros gravados com nível. Mensagens gravadas sem nível aparecem como `"level":"UNDEFINED"`; para ver
+> quais níveis existem: `filter ispresent(level) | stats count() by level, @log`.
+
 Notificações enviadas por hora:
 
 ```text
@@ -363,13 +444,18 @@ fields @timestamp
 | stats count() as enviados by bin(1h)
 ```
 
-Duração e cold start das funções (com logs em JSON, o resumo de cada execução vem no registro `platform.report`):
+Duração e cold start das funções (com logs em JSON, o resumo de cada execução vem no registro `platform.report`).
+Como as funções usam **SnapStart**, o cold start aparece como `restoreDurationMs` (restauração do snapshot), não como
+`initDurationMs`:
 
 ```text
 filter type = "platform.report"
 | stats avg(record.metrics.durationMs) as media_ms, max(record.metrics.durationMs) as max_ms,
-        count(record.metrics.initDurationMs) as cold_starts by @log
+        count(record.metrics.restoreDurationMs) as snapstart_restores by @log
 ```
+
+> Linhas `SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder"` na inicialização são avisos de uma
+> dependência sem implementação de log: inofensivos, mas ficam fora das consultas em JSON.
 
 ### 6.5 O alarme disparou, e agora?
 
@@ -395,11 +481,14 @@ Conferir o agendamento:
 aws scheduler get-schedule --name tc4-dev-weekly-report --query "[State,ScheduleExpression,ScheduleExpressionTimezone]"
 ```
 
-Disparar manualmente, sem esperar a segunda-feira:
+Disparar manualmente, sem esperar a segunda-feira (envia o relatório de verdade para os administradores):
 
 ```bash
 aws lambda invoke --function-name tc4-dev-weekly-report:live --payload '{}' --cli-binary-format raw-in-base64-out /tmp/out.json && cat /tmp/out.json
 ```
+
+Sucesso: `"StatusCode": 200` **sem** a linha `"FunctionError"`. O `null` no final é o conteúdo de `/tmp/out.json`
+(a função não devolve nada) e é esperado.
 
 Depois, conferir o log da execução:
 
@@ -407,8 +496,15 @@ Depois, conferir o log da execução:
 aws logs tail /aws/lambda/tc4-dev-weekly-report --since 5m --format short
 ```
 
-> _(a confirmar)_ Na branch atual a função de relatório ainda é um placeholder: registra a execução no log, mas não
-> envia e-mail.
+| Mensagem no log | Causa | Correção |
+|---|---|---|
+| `Weekly report generated with N feedback(s)` | Sucesso | — |
+| `not authorized to perform 'ses:SendEmail' on resource '...:identity/<destinatário>'` | No **sandbox**, o SES confere a permissão IAM do remetente **e de cada destinatário**, e a role da função só libera a identidade do remetente | Na `WeeklyReportRole`: `Resource` `identity/*` com a condição `ses:FromAddress` igual ao `SenderEmail` (mesmo padrão da role da notificação) |
+| `REPORT_RECIPIENTS is not configured` | Variável de ambiente ausente | Conferir o parâmetro `RecipientEmails` da stack |
+
+> _(a confirmar)_ Em 15/11/2026 o `tc4-dev` executava a versão completa do relatório e o envio falhava com o
+> `AccessDenied` acima; a correção da role está pendente. Na `ci/deploy-workflow` a função ainda é um placeholder
+> (só registra a execução no log).
 
 ---
 
