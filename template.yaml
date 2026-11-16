@@ -420,6 +420,7 @@ Resources:
       FunctionName: !Sub tc4-${Stage}-ingestion
       CodeUri: functions/ingestion
       Handler: br.com.fiap.tc4.ingestion.IngestionHandler::handleRequest
+      Description: Recebe POST /avaliacao, grava o feedback no DynamoDB e publica os críticos no SNS
       AutoPublishAliasAllProperties: true
       Role: !GetAtt IngestionRole.Arn
       LoggingConfig:
@@ -488,6 +489,7 @@ Resources:
       FunctionName: !Sub tc4-${Stage}-notification
       CodeUri: functions/notification
       Handler: br.com.fiap.tc4.notification.NotificationHandler::handleRequest
+      Description: Consome a fila de feedbacks críticos e envia o e-mail de alerta aos administradores pelo SES
       AutoPublishAliasAllProperties: true
       Role: !GetAtt NotificationRole.Arn
       LoggingConfig:
@@ -583,6 +585,7 @@ Resources:
       FunctionName: !Sub tc4-${Stage}-weekly-report
       CodeUri: functions/weekly-report
       Handler: br.com.fiap.tc4.report.WeeklyReportHandler::handleRequest
+      Description: Gera o relatório semanal dos feedbacks (média, contagens e lista) e envia pelo SES
       AutoPublishAliasAllProperties: true
       Role: !GetAtt WeeklyReportRole.Arn
       LoggingConfig:
