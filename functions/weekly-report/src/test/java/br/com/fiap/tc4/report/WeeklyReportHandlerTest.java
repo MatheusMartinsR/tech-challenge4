@@ -53,4 +53,15 @@ class WeeklyReportHandlerTest {
         assertEquals(7, record.get().rating());
     }
 
+    @Test
+    void reportDays_shouldCoverPreviousMondayToSundayWithoutExecutionDay() {
+        var monday = java.time.LocalDate.of(2026, 11, 16);
+
+        var days = WeeklyReportHandler.reportDays(monday);
+
+        assertEquals(7, days.size());
+        assertEquals(java.time.LocalDate.of(2026, 11, 9), days.get(0));
+        assertEquals(java.time.LocalDate.of(2026, 11, 15), days.get(6));
+    }
+
 }

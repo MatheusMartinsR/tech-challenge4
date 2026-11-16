@@ -66,10 +66,8 @@ public class WeeklyReportHandler implements RequestHandler<Map<String, Object>, 
 
     List<FeedbackRecord> loadLastWeek(String tableName) {
         List<FeedbackRecord> all = new ArrayList<>();
-        LocalDate today = LocalDate.now(BRASILIA);
-        LocalDate start = today.minusDays(6);
 
-        for (LocalDate date = start; !date.isAfter(today); date = date.plusDays(1)) {
+        for (LocalDate date : reportDays(LocalDate.now(BRASILIA))) {
             String pk = "DAY#" + date.format(DAY_KEY_FORMATTER);
             List<Map<String, AttributeValue>> items = queryDay(tableName, pk);
             for (Map<String, AttributeValue> item : items) {
@@ -82,6 +80,17 @@ public class WeeklyReportHandler implements RequestHandler<Map<String, Object>, 
 
         all.sort(Comparator.comparing(FeedbackRecord::createdAt));
         return all;
+    }
+
+    // Últimos 7 dias completos, sem o dia da execução: rodando na segunda às 08:00, cobre de
+    // segunda a domingo da semana anterior. Incluir o dia atual deixaria a segunda anterior
+    // (das 08:00 às 24:00) fora de todos os relatórios.
+    static List<LocalDate> reportDays(LocalDate today) {
+        List<LocalDate> days = new ArrayList<>();
+        for (LocalDate date = today.minusDays(7); date.isBefore(today); date = date.plusDays(1)) {
+            days.add(date);
+        }
+        return days;
     }
 
     private List<Map<String, AttributeValue>> queryDay(String tableName, String pk) {
