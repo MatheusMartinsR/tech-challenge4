@@ -1,0 +1,8 @@
+**
+!local/
+!local/Dockerfile
+!functions/
+!functions/ingestion/
+!functions/ingestion/pom.xml
+!functions/ingestion/src/
+!functions/ingestion/src/**

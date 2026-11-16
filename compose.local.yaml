@@ -1,0 +1,31 @@
+name: tc4-local
+
+services:
+  localstack:
+    image: localstack/localstack:4.0.3
+    ports:
+      - '127.0.0.1:4566:4566'
+    environment:
+      SERVICES: dynamodb,sns,sqs
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ENDPOINT_URL: http://localhost:4566
+    volumes:
+      - ./local/init-aws.sh:/etc/localstack/init/ready.d/init-aws.sh:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'test -f /tmp/tc4-ready']
+      interval: 3s
+      timeout: 3s
+      retries: 60
+      start_period: 10s
+
+  api:
+    build:
+      context: .
+      dockerfile: local/Dockerfile
+    ports:
+      - '127.0.0.1:3000:3000'
+    depends_on:
+      localstack:
+        condition: service_healthy

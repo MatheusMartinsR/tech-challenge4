@@ -1,0 +1,36 @@
+name: Ingestion tests
+
+on:
+  push:
+    paths: ['functions/ingestion/**', '.github/workflows/ingestion-tests.yml']
+  pull_request:
+    paths: ['functions/ingestion/**', '.github/workflows/ingestion-tests.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ingestion:
+    runs-on: ubuntu-latest
+    services:
+      localstack:
+        image: localstack/localstack:4.0.3
+        ports: ['4566:4566']
+        env:
+          SERVICES: dynamodb,sns,sqs
+        options: >-
+          --health-cmd "curl -f http://localhost:4566/_localstack/health"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: corretto
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: functions/ingestion/pom.xml
+      - name: Unit and integration tests
+        run: mvn -B -f functions/ingestion/pom.xml verify -Pintegration

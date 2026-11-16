@@ -191,6 +191,11 @@ Resources:
           Quota:
             Limit: 1000
             Period: DAY
+      GatewayResponses:
+        BAD_REQUEST_BODY:
+          StatusCode: '400'
+          ResponseTemplates:
+            application/json: '{"codigo":"ENTRADA_INVALIDA","mensagem":"Corpo inválido: informe descricao não vazia de até 1000 caracteres e nota inteira entre 0 e 10."}'
       # Payload inválido é rejeitado pelo API Gateway (400) sem invocar a função.
       # Os campos seguem o contrato do enunciado: { "descricao": string, "nota": int (0 a 10) }
       Models:
@@ -202,6 +207,7 @@ Resources:
               type: string
               minLength: 1
               maxLength: 1000
+              pattern: '\S'
             nota:
               type: integer
               minimum: 0
