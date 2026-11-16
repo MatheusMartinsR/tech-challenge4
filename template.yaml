@@ -36,6 +36,9 @@ Globals:
     MemorySize: 512
     Timeout: 20
     # SnapStart reduz o cold start do Java; exige versões publicadas (alias "live")
+    # Cada função também define AutoPublishAliasAllProperties (não é aceito em Globals): publica uma
+    # versão nova quando só a configuração muda (ex.: destinatários vindos de parâmetros). Sem isso,
+    # o SAM só publica quando o código muda e o alias "live" fica com as variáveis de ambiente antigas.
     AutoPublishAlias: live
     SnapStart:
       ApplyOn: PublishedVersions
@@ -417,6 +420,7 @@ Resources:
       FunctionName: !Sub tc4-${Stage}-ingestion
       CodeUri: functions/ingestion
       Handler: br.com.fiap.tc4.ingestion.IngestionHandler::handleRequest
+      AutoPublishAliasAllProperties: true
       Role: !GetAtt IngestionRole.Arn
       LoggingConfig:
         LogFormat: JSON
@@ -484,6 +488,7 @@ Resources:
       FunctionName: !Sub tc4-${Stage}-notification
       CodeUri: functions/notification
       Handler: br.com.fiap.tc4.notification.NotificationHandler::handleRequest
+      AutoPublishAliasAllProperties: true
       Role: !GetAtt NotificationRole.Arn
       LoggingConfig:
         LogFormat: JSON
@@ -578,6 +583,7 @@ Resources:
       FunctionName: !Sub tc4-${Stage}-weekly-report
       CodeUri: functions/weekly-report
       Handler: br.com.fiap.tc4.report.WeeklyReportHandler::handleRequest
+      AutoPublishAliasAllProperties: true
       Role: !GetAtt WeeklyReportRole.Arn
       LoggingConfig:
         LogFormat: JSON
