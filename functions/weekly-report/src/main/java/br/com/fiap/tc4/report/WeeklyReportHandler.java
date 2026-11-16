@@ -28,6 +28,7 @@ public class WeeklyReportHandler implements RequestHandler<Map<String, Object>, 
 
     private static final ZoneId BRASILIA = ZoneId.of("America/Sao_Paulo");
     private static final DateTimeFormatter DAY_KEY_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+    private static final DateTimeFormatter SENT_AT_FORMATTER = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
 
     @Override
     public Void handleRequest(Map<String, Object> input, Context context) {
@@ -155,7 +156,7 @@ public class WeeklyReportHandler implements RequestHandler<Map<String, Object>, 
         }
 
         double average = feedbacks.isEmpty() ? 0.0 : total / feedbacks.size();
-        return new WeeklyReport(average, byDay, byUrgency);
+        return new WeeklyReport(average, byDay, byUrgency, List.copyOf(feedbacks));
     }
 
     static FeedbackRecord createFeedbackRecord(int rating, String description, String urgency, String createdAt) {
@@ -204,7 +205,7 @@ public class WeeklyReportHandler implements RequestHandler<Map<String, Object>, 
         }
     }
 
-    private String buildEmailBody(WeeklyReport report) {
+    String buildEmailBody(WeeklyReport report) {
         StringBuilder body = new StringBuilder();
         body.append("Relatório semanal de feedbacks\n");
         body.append("Média geral: ").append(String.format("%.2f", report.average())).append("\n\n");
@@ -235,12 +236,36 @@ public class WeeklyReportHandler implements RequestHandler<Map<String, Object>, 
                             .append("\n"));
         }
 
+        // Lista exigida pelo enunciado: descrição, urgência e data de envio de cada feedback
+        body.append("\nFeedbacks da semana:\n");
+        if (report.feedbacks().isEmpty()) {
+            body.append("- Nenhum feedback registrado na última semana\n");
+        } else {
+            for (FeedbackRecord feedback : report.feedbacks()) {
+                body.append("- Data de envio: ").append(formatSentAt(feedback.createdAt()))
+                        .append(" | Urgência: ").append(feedback.urgency())
+                        .append(" | Nota: ").append(feedback.rating())
+                        .append(" | Descrição: ").append(feedback.description())
+                        .append("\n");
+            }
+        }
+
         return body.toString();
+    }
+
+    // Data de envio no horário de Brasília; se o valor gravado não for um instante ISO, usa como está
+    private static String formatSentAt(String createdAt) {
+        try {
+            return Instant.parse(createdAt).atZone(BRASILIA).format(SENT_AT_FORMATTER);
+        } catch (Exception e) {
+            return createdAt;
+        }
     }
 
     record FeedbackRecord(int rating, String description, String urgency, String createdAt) {
     }
 
-    record WeeklyReport(double average, Map<String, Integer> byDay, Map<String, Integer> byUrgency) {
+    record WeeklyReport(double average, Map<String, Integer> byDay, Map<String, Integer> byUrgency,
+            List<FeedbackRecord> feedbacks) {
     }
 }
