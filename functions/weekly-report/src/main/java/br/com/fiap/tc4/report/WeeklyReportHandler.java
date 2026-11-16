@@ -64,7 +64,7 @@ public class WeeklyReportHandler implements RequestHandler<Map<String, Object>, 
         }
     }
 
-    private List<FeedbackRecord> loadLastWeek(String tableName) {
+    List<FeedbackRecord> loadLastWeek(String tableName) {
         List<FeedbackRecord> all = new ArrayList<>();
         LocalDate today = LocalDate.now(BRASILIA);
         LocalDate start = today.minusDays(6);
@@ -97,7 +97,7 @@ public class WeeklyReportHandler implements RequestHandler<Map<String, Object>, 
         }
     }
 
-    private FeedbackRecord parseFeedback(Map<String, AttributeValue> item) {
+    FeedbackRecord parseFeedback(Map<String, AttributeValue> item) {
         try {
             Integer rating = item.get("rating") == null || item.get("rating").n() == null
                     ? null
@@ -117,7 +117,11 @@ public class WeeklyReportHandler implements RequestHandler<Map<String, Object>, 
         }
     }
 
-    private String resolveUrgency(int rating, String urgency) {
+    java.util.Optional<FeedbackRecord> parseFeedbackForTest(Map<String, AttributeValue> item) {
+        return java.util.Optional.ofNullable(parseFeedback(item));
+    }
+
+    String resolveUrgency(int rating, String urgency) {
         if (urgency != null && !urgency.isBlank()) {
             return urgency.trim().toUpperCase();
         }
@@ -130,7 +134,7 @@ public class WeeklyReportHandler implements RequestHandler<Map<String, Object>, 
         return "LOW";
     }
 
-    private WeeklyReport buildReport(List<FeedbackRecord> feedbacks) {
+    WeeklyReport buildReport(List<FeedbackRecord> feedbacks) {
         Map<String, Integer> byDay = new HashMap<>();
         Map<String, Integer> byUrgency = new HashMap<>();
         double total = 0;
@@ -145,13 +149,25 @@ public class WeeklyReportHandler implements RequestHandler<Map<String, Object>, 
         return new WeeklyReport(average, byDay, byUrgency);
     }
 
-    private String extractDay(String createdAt) {
+    static FeedbackRecord createFeedbackRecord(int rating, String description, String urgency, String createdAt) {
+        return new FeedbackRecord(rating, description, urgency, createdAt);
+    }
+
+    WeeklyReport buildReportForTest(List<FeedbackRecord> feedbacks) {
+        return buildReport(feedbacks);
+    }
+
+    String extractDay(String createdAt) {
         if (createdAt == null || createdAt.isBlank()) {
             return LocalDate.now(BRASILIA).format(DAY_KEY_FORMATTER);
         }
 
         Instant instant = Instant.parse(createdAt);
         return instant.atZone(BRASILIA).toLocalDate().format(DAY_KEY_FORMATTER);
+    }
+
+    String extractDayForTest(String createdAt) {
+        return extractDay(createdAt);
     }
 
     private void sendEmail(String senderEmail, String reportRecipients, WeeklyReport report) {
@@ -213,9 +229,9 @@ public class WeeklyReportHandler implements RequestHandler<Map<String, Object>, 
         return body.toString();
     }
 
-    private record FeedbackRecord(int rating, String description, String urgency, String createdAt) {
+    record FeedbackRecord(int rating, String description, String urgency, String createdAt) {
     }
 
-    private record WeeklyReport(double average, Map<String, Integer> byDay, Map<String, Integer> byUrgency) {
+    record WeeklyReport(double average, Map<String, Integer> byDay, Map<String, Integer> byUrgency) {
     }
 }

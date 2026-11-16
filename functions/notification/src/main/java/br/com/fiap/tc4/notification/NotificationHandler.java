@@ -51,7 +51,7 @@ public class NotificationHandler implements RequestHandler<SQSEvent, SQSBatchRes
 
     @Override
     public SQSBatchResponse handleRequest(SQSEvent event, Context context) {
-        LambdaLogger logger = context.getLogger();
+        LambdaLogger logger = context == null ? null : context.getLogger();
         List<SQSBatchResponse.BatchItemFailure> failures = new ArrayList<>();
 
         for (SQSEvent.SQSMessage message : event.getRecords()) {
@@ -60,13 +60,17 @@ public class NotificationHandler implements RequestHandler<SQSEvent, SQSBatchRes
                 CriticalFeedbackEvent feedback = MAPPER.readValue(message.getBody(), CriticalFeedbackEvent.class);
                 feedback.validate();
                 String sesMessageId = send(NotificationEmail.from(feedback));
-                logger.log("Notification sent: sqsMessageId=%s feedbackId=%s sesMessageId=%s recipients=%d"
-                        .formatted(messageId, feedback.id(), sesMessageId, recipients.size()), LogLevel.INFO);
+                if (logger != null) {
+                    logger.log("Notification sent: sqsMessageId=%s feedbackId=%s sesMessageId=%s recipients=%d"
+                            .formatted(messageId, feedback.id(), sesMessageId, recipients.size()), LogLevel.INFO);
+                }
             } catch (Exception e) {
                 // Não loga o corpo da mensagem: a descrição é texto livre do aluno
-                logger.log("Notification failed: sqsMessageId=%s receiveCount=%s error=%s: %s"
-                        .formatted(messageId, receiveCount(message), e.getClass().getSimpleName(), e.getMessage()),
-                        LogLevel.ERROR);
+                if (logger != null) {
+                    logger.log("Notification failed: sqsMessageId=%s receiveCount=%s error=%s: %s"
+                            .formatted(messageId, receiveCount(message), e.getClass().getSimpleName(), e.getMessage()),
+                            LogLevel.ERROR);
+                }
                 failures.add(new SQSBatchResponse.BatchItemFailure(messageId));
             }
         }
