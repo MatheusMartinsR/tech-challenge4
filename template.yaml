@@ -289,6 +289,7 @@ Resources:
         Variables:
           SENDER_EMAIL: !Ref SenderEmail
           RECIPIENT_EMAILS: !Ref RecipientEmails
+          TEMPLATE_NAME: !Ref CriticalFeedbackEmailTemplate
       Events:
         NotificationQueueEvent:
           Type: SQS
@@ -303,7 +304,26 @@ Resources:
       LogGroupName: !Sub /aws/lambda/tc4-${Stage}-notification
       RetentionInDays: !Ref LogRetentionDays
 
-  # TODO (Issue de e-mail): incluir o ARN do template do SES, se for usado
+  # Template do e-mail de feedback crítico (Issue de e-mail). {{campo}} é escapado pelo SES;
+  # nunca usar {{{campo}}}, porque a descrição é texto livre do estudante.
+  # Campos: descricao, nota, urgencia, dataEnvio e id (preenchidos pela função de notificação).
+  CriticalFeedbackEmailTemplate:
+    Type: AWS::SES::Template
+    Properties:
+      Template:
+        TemplateName: !Sub tc4-${Stage}-critical-feedback
+        SubjectPart: '[Feedback crítico] Urgência {{urgencia}} - nota {{nota}}'
+        TextPart: |
+          Um feedback crítico foi recebido na plataforma de avaliação de aulas.
+
+          Descrição: {{descricao}}
+          Nota: {{nota}}
+          Urgência: {{urgencia}}
+          Data de envio: {{dataEnvio}}
+          ID: {{id}}
+        HtmlPart: >-
+          <html><body style="font-family:Arial,sans-serif"><h2 style="color:#b00020">Alerta: avaliação crítica de aula - Tech Challenge 4</h2><table cellpadding="6" style="border-collapse:collapse"><tr><td><b>Descrição</b></td><td>{{descricao}}</td></tr><tr><td><b>Nota</b></td><td>{{nota}}</td></tr><tr><td><b>Urgência</b></td><td>{{urgencia}}</td></tr><tr><td><b>Data de envio</b></td><td>{{dataEnvio}}</td></tr><tr><td><b>ID</b></td><td>{{id}}</td></tr></table><p style="color:#666;font-size:12px">Este é um e-mail enviado automaticamente pelo Tech Challenge 4.</p></body></html>
+
   # O recurso cobre as identidades da conta na região, não só o remetente, por precaução: no sandbox
   # os destinatários também são identidades verificadas e o SES pode conferir a permissão contra elas.
   # A condição ses:FromAddress mantém o envio restrito ao remetente configurado.
@@ -337,6 +357,11 @@ Resources:
                 Condition:
                   StringEquals:
                     ses:FromAddress: !Ref SenderEmail
+              # O envio com template é autorizado contra a identidade (acima) e contra o template
+              - Sid: UseCriticalFeedbackTemplate
+                Effect: Allow
+                Action: ses:SendEmail
+                Resource: !Sub arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:template/${CriticalFeedbackEmailTemplate}
 
   # ---------------------------------------------------------------------------
   # Função de relatório: executada toda segunda-feira às 08:00 (horário de Brasília)
