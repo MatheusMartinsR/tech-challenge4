@@ -1,0 +1,73 @@
+{
+  "info": {
+    "name": "tc4-api-tests",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Cenários de sucesso e erro para a API de feedback"
+  },
+  "item": [
+    {
+      "name": "POST /avaliacao - sucesso",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "x-api-key", "value": "{{apiKey}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"descricao\":\"Aula muito boa\",\"nota\":9}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/avaliacao",
+          "host": ["{{baseUrl}}"],
+          "path": ["avaliacao"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "POST /avaliacao - nota invalida",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "x-api-key", "value": "{{apiKey}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"descricao\":\"Aula ruim\",\"nota\":11}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/avaliacao",
+          "host": ["{{baseUrl}}"],
+          "path": ["avaliacao"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "POST /avaliacao - descricao obrigatoria",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "x-api-key", "value": "{{apiKey}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"nota\":5}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/avaliacao",
+          "host": ["{{baseUrl}}"],
+          "path": ["avaliacao"]
+        }
+      },
+      "response": []
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "https://<api-id>.execute-api.us-east-1.amazonaws.com/dev" },
+    { "key": "apiKey", "value": "<api-key>" }
+  ]
+}
