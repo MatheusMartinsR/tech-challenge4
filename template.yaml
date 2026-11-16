@@ -72,6 +72,41 @@ Resources:
           KeyType: RANGE
       DeletionProtectionEnabled: !If [IsProd, true, false]
 
+  # Resource policy com duas camadas de defesa:
+  #   1. DenyInsecureTransport: bloqueia chamadas sem TLS no nível do recurso,
+  #      independente da IAM policy do chamador.
+  #   2. DenyUnauthorizedPrincipals: nega qualquer principal que não seja uma
+  #      das roles autorizadas (IngestionRole ou WeeklyReportRole).
+  #
+  # ATENÇÃO ao deploy: a role usada pelo sam deploy também precisa estar na lista
+  # ArnNotEquals — ou o CloudFormation ficará bloqueado ao atualizar a tabela.
+  # Em pipelines de CI/CD, inclua a role do pipeline na lista.
+  FeedbackTableResourcePolicy:
+    Type: AWS::DynamoDB::ResourcePolicy
+    Properties:
+      ResourceArn: !GetAtt FeedbackTable.Arn
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 'dynamodb:*'
+            Resource: !GetAtt FeedbackTable.Arn
+            Condition:
+              Bool:
+                'aws:SecureTransport': 'false'
+          - Sid: DenyUnauthorizedPrincipals
+            Effect: Deny
+            Principal: '*'
+            Action: 'dynamodb:*'
+            Resource: !GetAtt FeedbackTable.Arn
+            Condition:
+              ArnNotEquals:
+                'aws:PrincipalArn':
+                  - !GetAtt IngestionRole.Arn
+                  - !GetAtt WeeklyReportRole.Arn
+
   # ---------------------------------------------------------------------------
   # Eventos: ingestão -> SNS -> SQS -> notificação (falhas vão para a DLQ)
   # ---------------------------------------------------------------------------
@@ -453,6 +488,9 @@ Resources:
                 Effect: Allow
                 Action: dynamodb:PutItem
                 Resource: !GetAtt FeedbackTable.Arn
+                Condition:
+                  Bool:
+                    'aws:SecureTransport': 'true'
               - Sid: PublishCriticalFeedback
                 Effect: Allow
                 Action: sns:Publish
@@ -606,6 +644,9 @@ Resources:
                 Effect: Allow
                 Action: dynamodb:Query
                 Resource: !GetAtt FeedbackTable.Arn
+                Condition:
+                  Bool:
+                    'aws:SecureTransport': 'true'
               - Sid: SendEmail
                 Effect: Allow
                 Action: [ses:SendEmail, ses:SendRawEmail]
