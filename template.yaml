@@ -72,40 +72,12 @@ Resources:
           KeyType: RANGE
       DeletionProtectionEnabled: !If [IsProd, true, false]
 
-  # Resource policy com duas camadas de defesa:
-  #   1. DenyInsecureTransport: bloqueia chamadas sem TLS no nível do recurso,
-  #      independente da IAM policy do chamador.
-  #   2. DenyUnauthorizedPrincipals: nega qualquer principal que não seja uma
-  #      das roles autorizadas (IngestionRole ou WeeklyReportRole).
-  #
-  # ATENÇÃO ao deploy: a role usada pelo sam deploy também precisa estar na lista
-  # ArnNotEquals — ou o CloudFormation ficará bloqueado ao atualizar a tabela.
-  # Em pipelines de CI/CD, inclua a role do pipeline na lista.
-  FeedbackTableResourcePolicy:
-    Type: AWS::DynamoDB::ResourcePolicy
-    Properties:
-      ResourceArn: !GetAtt FeedbackTable.Arn
-      PolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Sid: DenyInsecureTransport
-            Effect: Deny
-            Principal: '*'
-            Action: 'dynamodb:*'
-            Resource: !GetAtt FeedbackTable.Arn
-            Condition:
-              Bool:
-                'aws:SecureTransport': 'false'
-          - Sid: DenyUnauthorizedPrincipals
-            Effect: Deny
-            Principal: '*'
-            Action: 'dynamodb:*'
-            Resource: !GetAtt FeedbackTable.Arn
-            Condition:
-              ArnNotEquals:
-                'aws:PrincipalArn':
-                  - !GetAtt IngestionRole.Arn
-                  - !GetAtt WeeklyReportRole.Arn
+  # Acesso à tabela controlado pelas roles de cada função (menor privilégio):
+  #   - IngestionRole: só dynamodb:PutItem, e só com TLS (aws:SecureTransport)
+  #   - WeeklyReportRole: só dynamodb:Query, e só com TLS (aws:SecureTransport)
+  # Não há resource policy na tabela: o tipo AWS::DynamoDB::ResourcePolicy não existe no
+  # CloudFormation, e uma regra que nega qualquer principal fora dessas roles também bloquearia
+  # a role do pipeline de deploy e o acesso pelo console.
 
   # ---------------------------------------------------------------------------
   # Eventos: ingestão -> SNS -> SQS -> notificação (falhas vão para a DLQ)
