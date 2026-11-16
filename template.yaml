@@ -553,9 +553,11 @@ Resources:
                 Effect: Allow
                 Action: [sqs:ReceiveMessage, sqs:DeleteMessage, sqs:GetQueueAttributes]
                 Resource: !GetAtt NotificationQueue.Arn
+              # Envio com template (SendEmail da API v2 com Content.Template): a AWS confere a ação
+              # ses:SendTemplatedEmail, não ses:SendEmail. Sem ela, o envio falha com 403.
               - Sid: SendEmail
                 Effect: Allow
-                Action: ses:SendEmail
+                Action: [ses:SendEmail, ses:SendTemplatedEmail]
                 Resource: !Sub arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/*
                 Condition:
                   StringEquals:
@@ -563,7 +565,7 @@ Resources:
               # O envio com template é autorizado contra a identidade (acima) e contra o template
               - Sid: UseCriticalFeedbackTemplate
                 Effect: Allow
-                Action: ses:SendEmail
+                Action: [ses:SendEmail, ses:SendTemplatedEmail]
                 Resource: !Sub arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:template/${CriticalFeedbackEmailTemplate}
 
   # ---------------------------------------------------------------------------
